@@ -1,4 +1,4 @@
-# price_fetcher.py (Versão Otimizada)
+# price_fetcher.py (Versão Final Corrigida com Volume)
 import requests
 import pandas as pd
 import time
@@ -19,11 +19,10 @@ SYMBOL_TO_ID = {
 
 def fetch_all_raw_data(symbols, days=10):
     """
-    Busca os dados brutos (horários) para todos os símbolos uma única vez.
-    Buscamos 10 dias para garantir dados suficientes para a análise de 4h.
+    Busca os dados brutos (preço E volume) para todos os símbolos uma única vez.
     """
     all_data = {}
-    print("\n🔁 Buscando dados brutos do mercado...")
+    print("\n🔁 Buscando dados brutos do mercado (Preço e Volume)...")
     for symbol in symbols:
         coin_id = SYMBOL_TO_ID.get(symbol)
         if not coin_id:
@@ -37,17 +36,30 @@ def fetch_all_raw_data(symbols, days=10):
             response.raise_for_status()
             data = response.json()
 
-            if "prices" in data and data["prices"]:
-                df = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
-                df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-                all_data[symbol] = df
+            # --- CORREÇÃO APLICADA AQUI ---
+            # Verifica se ambos, preços e volumes, existem na resposta da API
+            if "prices" in data and data["prices"] and "total_volumes" in data and data["total_volumes"]:
+                
+                # 1. Cria o DataFrame de preços
+                df_price = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
+                df_price["timestamp"] = pd.to_datetime(df_price["timestamp"], unit="ms")
+                
+                # 2. Cria o DataFrame de volumes
+                df_volume = pd.DataFrame(data["total_volumes"], columns=["timestamp", "volume"])
+                df_volume["timestamp"] = pd.to_datetime(df_volume["timestamp"], unit="ms")
+
+                # 3. Junta os dois DataFrames usando o timestamp como chave
+                # O 'merge' garante que apenas os timestamps que existem em ambos serão mantidos.
+                df_final = pd.merge(df_price, df_volume, on="timestamp")
+
+                all_data[symbol] = df_final
                 print(f"✅ Dados brutos para {symbol} recebidos.")
             else:
-                print(f"⚠️ Dados de preço indisponíveis para {symbol}.")
+                print(f"⚠️ Dados de preço ou volume indisponíveis para {symbol}.")
         
         except Exception as e:
             print(f"❌ Erro ao buscar dados de {symbol}: {e}")
         
-        time.sleep(2.5) # Aumentamos o delay para garantir que não excederemos o limite
+        time.sleep(2.5)
     
     return all_data
