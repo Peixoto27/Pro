@@ -23,7 +23,7 @@ for symbol in symbols:
         else:
             print(f"ℹ️ Nenhum sinal válido para {symbol}.\n")
 
-        time.sleep(1.5)  # Delay entre chamadas
+        time.sleep(2.5)  # Delay entre chamadas
 
     except Exception as e:
         print(f"❌ Erro ao processar {symbol}: {e}\n")
