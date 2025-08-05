@@ -4,18 +4,17 @@ import pandas as pd
 import time
 import os
 
-# --- CORREÇÕES PRINCIPAIS ---
-# 1. Carregar a chave de uma variável de ambiente para segurança.
-#    No seu ambiente de deploy (Vercel, Heroku, etc.), configure uma variável de ambiente chamada COINGECKO_API_KEY.
+# A chave "CG-..." é para o plano DEMO.
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "CG-SnFGo9ozwT62MLbBiuuzpxxh")
 
-# 2. Usar a URL base da API Pro.
-COINGECKO_BASE_URL = "https://pro-api.coingecko.com/api/v3"
+# --- CORREÇÃO ---
+# 1. Usar a URL base da API DEMO (gratuita).
+COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
 
-# 3. Usar o nome de cabeçalho correto para a API Pro.
+# 2. Usar o nome de cabeçalho correto para a API DEMO.
 HEADERS = {
     "accept": "application/json",
-    "x-cg-pro-api-key": COINGECKO_API_KEY
+    "x-cg-demo-api-key": COINGECKO_API_KEY
 }
 
 # Dicionário para mapear símbolos para IDs do CoinGecko
@@ -41,7 +40,7 @@ def fetch_historical_data_coingecko(symbol, days=2):
 
     try:
         response = requests.get(url, params=params, headers=HEADERS)
-        response.raise_for_status()  # Lança um erro para status HTTP 4xx/5xx
+        response.raise_for_status()
         data = response.json()
 
         if "prices" not in data or not data["prices"]:
@@ -52,22 +51,19 @@ def fetch_historical_data_coingecko(symbol, days=2):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         df.set_index("timestamp", inplace=True)
         
-        # Adiciona dados de volume se disponíveis
         if "total_volumes" in data and data["total_volumes"]:
             volumes_df = pd.DataFrame(data["total_volumes"], columns=["timestamp", "volume"])
             volumes_df["timestamp"] = pd.to_datetime(volumes_df["timestamp"], unit="ms")
             volumes_df.set_index("timestamp", inplace=True)
             df = df.join(volumes_df, how="inner")
 
-        # Garante que os tipos de dados estão corretos
         df = df.apply(pd.to_numeric, errors="coerce").dropna()
-        
-        # Reamostra para garantir uma frequência horária consistente e preenche lacunas
         df = df.resample('1h').last().ffill().reset_index()
 
         return df
 
     except requests.exceptions.HTTPError as http_err:
+        # Imprime a mensagem de erro da API, que é mais informativa
         print(f"⚠️ Erro HTTP para {symbol}: {http_err.response.status_code} - {http_err.response.text}")
         return None
     except Exception as e:
@@ -84,5 +80,6 @@ def fetch_all_data(symbols):
             all_data[symbol] = df
         else:
             print(f"⚠️ Dados indisponíveis para {symbol}. Pulando...")
-        time.sleep(1.5)  # Delay para não exceder o limite da API
+        # O plano Demo tem um limite de requisições mais baixo, então um delay maior é mais seguro.
+        time.sleep(2.5) 
     return all_data
