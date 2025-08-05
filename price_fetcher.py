@@ -1,60 +1,66 @@
 import requests
+import pandas as pd
+from datetime import datetime
 
 def fetch_price_data(symbol):
+    cg_ids = {
+        'BTCUSDT': 'bitcoin',
+        'ETHUSDT': 'ethereum',
+        'BNBUSDT': 'binancecoin',
+        'SOLUSDT': 'solana',
+        'XRPUSDT': 'ripple',
+        'ADAUSDT': 'cardano',
+        'AVAXUSDT': 'avalanche-2',
+        'DOTUSDT': 'polkadot',
+        'LINKUSDT': 'chainlink',
+        'TONUSDT': 'toncoin',
+        'INJUSDT': 'injective-protocol',
+        'RNDRUSDT': 'render-token',
+        'ARBUSDT': 'arbitrum'
+    }
+
+    coin_id = cg_ids.get(symbol)
+    if not coin_id:
+        print(f"❌ CoinGecko ID não encontrado para {symbol}")
+        return None
+
     try:
-        # Tenta Binance primeiro
-        binance_url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
-        res = requests.get(binance_url, timeout=5)
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc?vs_currency=usd&days=1"
+        res = requests.get(url, timeout=5)
+
         if res.status_code == 200:
             data = res.json()
-            return {
-                "price": float(data["lastPrice"]),
-                "volume": float(data["quoteVolume"]),
-                "price_change_percent": float(data["priceChangePercent"])
-            }
-        elif res.status_code == 451:
-            print(f"🔁 Binance bloqueada para {symbol}. Usando CoinGecko...")
-        else:
-            print(f"⚠️ Erro Binance para {symbol}: {res.status_code}")
 
-    except Exception as e:
-        print(f"❌ Erro Binance para {symbol}: {e}")
+            if not data or len(data) < 20:
+                print(f"⚠️ Dados insuficientes para {symbol}")
+                return None
 
-    # Fallback CoinGecko
-    try:
-        cg_ids = {
-            'BTCUSDT': 'bitcoin',
-            'ETHUSDT': 'ethereum',
-            'BNBUSDT': 'binancecoin',
-            'SOLUSDT': 'solana',
-            'XRPUSDT': 'ripple',
-            'ADAUSDT': 'cardano',
-            'AVAXUSDT': 'avalanche-2',
-            'DOTUSDT': 'polkadot',
-            'LINKUSDT': 'chainlink',
-            'TONUSDT': 'toncoin',
-            'INJUSDT': 'injective-protocol',
-            'RNDRUSDT': 'render-token',
-            'ARBUSDT': 'arbitrum'
-        }
+            df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
 
-        coin_id = cg_ids.get(symbol)
-        if not coin_id:
-            return None
+            # Volume separado
+            volume_url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=1"
+            vol_res = requests.get(volume_url, timeout=5)
+            if vol_res.status_code == 200:
+                vol_data = vol_res.json().get("total_volumes", [])
+                if vol_data:
+                    volume_df = pd.DataFrame(vol_data, columns=["timestamp", "volume"])
+                    volume_df["timestamp"] = pd.to_datetime(volume_df["timestamp"], unit="ms")
+                    volume_df = volume_df.set_index("timestamp").resample("1H").mean().fillna(method='ffill').reset_index()
+                    df = pd.merge_asof(df.sort_values("timestamp"), volume_df.sort_values("timestamp"), on="timestamp")
+                else:
+                    df["volume"] = 0
+            else:
+                df["volume"] = 0
 
-        cg_url = f"https://api.coingecko.com/api/v3/coins/{coin_id}?localization=false&tickers=false&market_data=true"
-        res = requests.get(cg_url, timeout=5)
-        if res.status_code == 200:
-            coin = res.json()["market_data"]
-            return {
-                "price": coin["current_price"]["usd"],
-                "volume": coin["total_volume"]["usd"],
-                "price_change_percent": coin["price_change_percentage_24h"]
-            }
+            return df
+
+        elif res.status_code == 429:
+            print(f"⚠️ Limite atingido na CoinGecko para {symbol}.")
         else:
             print(f"⚠️ Erro CoinGecko {symbol}: {res.status_code}")
-            return None
 
     except Exception as e:
-        print(f"❌ Erro CoinGecko {symbol}: {e}")
-        return None
+        print(f"❌ Erro ao buscar dados de {symbol}: {e}")
+
+    return None
