@@ -4,20 +4,14 @@ import pandas as pd
 import time
 import os
 
-# A chave "CG-..." é para o plano DEMO.
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "CG-SnFGo9ozwT62MLbBiuuzpxxh")
-
-# --- CORREÇÃO ---
-# 1. Usar a URL base da API DEMO (gratuita).
 COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
 
-# 2. Usar o nome de cabeçalho correto para a API DEMO.
 HEADERS = {
     "accept": "application/json",
     "x-cg-demo-api-key": COINGECKO_API_KEY
 }
 
-# Dicionário para mapear símbolos para IDs do CoinGecko
 SYMBOL_TO_ID = {
     "BTCUSDT": "bitcoin", "ETHUSDT": "ethereum", "BNBUSDT": "binancecoin",
     "SOLUSDT": "solana", "XRPUSDT": "ripple", "ADAUSDT": "cardano",
@@ -36,7 +30,14 @@ def fetch_historical_data_coingecko(symbol, days=2):
         return None
 
     url = f"{COINGECKO_BASE_URL}/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": days, "interval": "hourly"}
+    
+    # --- CORREÇÃO FINAL ---
+    # O parâmetro 'interval' foi removido.
+    # A API retornará dados horários por padrão se 'days' estiver entre 2 e 90.
+    params = {
+        "vs_currency": "usd",
+        "days": days
+    }
 
     try:
         response = requests.get(url, params=params, headers=HEADERS)
@@ -63,7 +64,6 @@ def fetch_historical_data_coingecko(symbol, days=2):
         return df
 
     except requests.exceptions.HTTPError as http_err:
-        # Imprime a mensagem de erro da API, que é mais informativa
         print(f"⚠️ Erro HTTP para {symbol}: {http_err.response.status_code} - {http_err.response.text}")
         return None
     except Exception as e:
@@ -78,8 +78,9 @@ def fetch_all_data(symbols):
         df = fetch_historical_data_coingecko(symbol)
         if df is not None and not df.empty:
             all_data[symbol] = df
+            # Adiciona uma mensagem de sucesso para melhor feedback
+            print(f"✅ Dados de {symbol} recebidos com sucesso.")
         else:
             print(f"⚠️ Dados indisponíveis para {symbol}. Pulando...")
-        # O plano Demo tem um limite de requisições mais baixo, então um delay maior é mais seguro.
         time.sleep(2.5) 
     return all_data
