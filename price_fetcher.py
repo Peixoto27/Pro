@@ -1,95 +1,88 @@
+# price_fetcher.py
 import requests
 import pandas as pd
 import time
-from datetime import datetime
+import os
 
-COINGECKO_API_KEY = "CG-SnFGo9ozwT62MLbBiuuzpxxh"
-COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
+# --- CORREÇÕES PRINCIPAIS ---
+# 1. Carregar a chave de uma variável de ambiente para segurança.
+#    No seu ambiente de deploy (Vercel, Heroku, etc.), configure uma variável de ambiente chamada COINGECKO_API_KEY.
+COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "CG-SnFGo9ozwT62MLbBiuuzpxxh")
 
+# 2. Usar a URL base da API Pro.
+COINGECKO_BASE_URL = "https://pro-api.coingecko.com/api/v3"
+
+# 3. Usar o nome de cabeçalho correto para a API Pro.
 HEADERS = {
     "accept": "application/json",
-    "x-cg-demo-api-key": COINGECKO_API_KEY
+    "x-cg-pro-api-key": COINGECKO_API_KEY
 }
 
+# Dicionário para mapear símbolos para IDs do CoinGecko
 SYMBOL_TO_ID = {
-    "BTCUSDT": "bitcoin",
-    "ETHUSDT": "ethereum",
-    "BNBUSDT": "binancecoin",
-    "SOLUSDT": "solana",
-    "XRPUSDT": "ripple",
-    "ADAUSDT": "cardano",
-    "AVAXUSDT": "avalanche-2",
-    "DOTUSDT": "polkadot",
-    "LINKUSDT": "chainlink",
-    "TONUSDT": "the-open-network",
-    "INJUSDT": "injective-protocol",
-    "RNDRUSDT": "render-token",
-    "ARBUSDT": "arbitrum",
-    "LTCUSDT": "litecoin",
-    "MATICUSDT": "matic-network",
-    "OPUSDT": "optimism",
-    "NEARUSDT": "near",
-    "APTUSDT": "aptos",
-    "PEPEUSDT": "pepe",
-    "SEIUSDT": "sei-network"
+    "BTCUSDT": "bitcoin", "ETHUSDT": "ethereum", "BNBUSDT": "binancecoin",
+    "SOLUSDT": "solana", "XRPUSDT": "ripple", "ADAUSDT": "cardano",
+    "AVAXUSDT": "avalanche-2", "DOTUSDT": "polkadot", "LINKUSDT": "chainlink",
+    "TONUSDT": "the-open-network", "INJUSDT": "injective-protocol", "RNDRUSDT": "render-token",
+    "ARBUSDT": "arbitrum", "LTCUSDT": "litecoin", "MATICUSDT": "matic-network",
+    "OPUSDT": "optimism", "NEARUSDT": "near", "APTUSDT": "aptos",
+    "PEPEUSDT": "pepe", "SEIUSDT": "sei-network"
 }
 
 def fetch_historical_data_coingecko(symbol, days=2):
-    if symbol not in SYMBOL_TO_ID:
-        print(f"❌ Moeda não reconhecida: {symbol}")
+    """Busca dados históricos de uma moeda específica no CoinGecko."""
+    coin_id = SYMBOL_TO_ID.get(symbol)
+    if not coin_id:
+        print(f"❌ Moeda não reconhecida no mapeamento: {symbol}")
         return None
 
-    coin_id = SYMBOL_TO_ID[symbol]
     url = f"{COINGECKO_BASE_URL}/coins/{coin_id}/market_chart"
-    params = {
-        "vs_currency": "usd",
-        "days": days,
-        "interval": "hourly"
-    }
+    params = {"vs_currency": "usd", "days": days, "interval": "hourly"}
 
     try:
         response = requests.get(url, params=params, headers=HEADERS)
-        if response.status_code == 401:
-            print(f"⚠️ Erro CoinGecko {symbol}: 401 (API key inválida ou ausente)")
-            return None
-        if response.status_code == 429:
-            print(f"⚠️ Erro CoinGecko {symbol}: 429 (Limite atingido)")
-            return None
-        response.raise_for_status()
+        response.raise_for_status()  # Lança um erro para status HTTP 4xx/5xx
         data = response.json()
 
-        if "prices" not in data or "total_volumes" not in data:
-            print(f"⚠️ Dados incompletos para {symbol}")
+        if "prices" not in data or not data["prices"]:
+            print(f"⚠️ Dados de preço indisponíveis para {symbol} na resposta da API.")
             return None
 
-        prices = data["prices"]
-        volumes = data["total_volumes"]
-
-        df = pd.DataFrame(prices, columns=["timestamp", "close"])
-        df["volume"] = [v[1] for v in volumes]
+        df = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df.set_index("timestamp", inplace=True)
+        
+        # Adiciona dados de volume se disponíveis
+        if "total_volumes" in data and data["total_volumes"]:
+            volumes_df = pd.DataFrame(data["total_volumes"], columns=["timestamp", "volume"])
+            volumes_df["timestamp"] = pd.to_datetime(volumes_df["timestamp"], unit="ms")
+            volumes_df.set_index("timestamp", inplace=True)
+            df = df.join(volumes_df, how="inner")
 
-        df["close"] = pd.to_numeric(df["close"], errors="coerce")
-        df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
-
-        df = df.dropna().reset_index(drop=True)
-        df = df.set_index("timestamp").resample("1h").mean().ffill().dropna().reset_index()
+        # Garante que os tipos de dados estão corretos
+        df = df.apply(pd.to_numeric, errors="coerce").dropna()
+        
+        # Reamostra para garantir uma frequência horária consistente e preenche lacunas
+        df = df.resample('1h').last().ffill().reset_index()
 
         return df
 
+    except requests.exceptions.HTTPError as http_err:
+        print(f"⚠️ Erro HTTP para {symbol}: {http_err.response.status_code} - {http_err.response.text}")
+        return None
     except Exception as e:
-        print(f"❌ Erro ao buscar dados de {symbol}: {e}")
+        print(f"❌ Erro inesperado ao buscar dados de {symbol}: {e}")
         return None
 
-
 def fetch_all_data(symbols):
+    """Busca dados para uma lista de símbolos com um delay entre as chamadas."""
     all_data = {}
     for symbol in symbols:
         print(f"🔁 Buscando dados de {symbol}...")
         df = fetch_historical_data_coingecko(symbol)
-        if df is not None:
+        if df is not None and not df.empty:
             all_data[symbol] = df
         else:
             print(f"⚠️ Dados indisponíveis para {symbol}. Pulando...")
-        time.sleep(2.5)  # Delay entre chamadas
+        time.sleep(1.5)  # Delay para não exceder o limite da API
     return all_data
