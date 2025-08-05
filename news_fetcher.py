@@ -1,23 +1,31 @@
+# news_fetcher.py
 import requests
+import os
 
-RSS_FEEDS = {
-    "BTC": "https://cryptopanic.com/api/v1/posts/?auth_token=demo&currencies=BTC",
-    "ETH": "https://cryptopanic.com/api/v1/posts/?auth_token=demo&currencies=ETH",
-    "SOL": "https://cryptopanic.com/api/v1/posts/?auth_token=demo&currencies=SOL"
-}
+# A API do CryptoPanic não requer chave para o endpoint público
+CRYPTOPANIC_API_URL = "https://cryptopanic.com/api/v1/posts/"
 
-def fetch_news_summary(symbol):
-    symbol_key = symbol.split("/")[0]
-    feed_url = RSS_FEEDS.get(symbol_key)
-    if not feed_url:
-        return "Sem fonte de notícia para esse ativo."
+def get_recent_news(symbol):
+    """Busca as notícias mais recentes para um símbolo de moeda específico."""
+    # Remove 'USDT' do símbolo para buscar (ex: 'BTCUSDT' -> 'BTC')
+    currency_code = symbol.replace("USDT", "")
+    
+    params = {
+        "auth_token": os.getenv("CRYPTOPANIC_API_KEY", ""), # Chave opcional para planos pagos
+        "currencies": currency_code,
+        "public": "true"
+    }
+    
     try:
-        response = requests.get(feed_url)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("results"):
-                latest = data["results"][0]
-                return f"{latest['title']} ({latest['published_at'][:10]})"
-        return "Notícia não encontrada."
+        response = requests.get(CRYPTOPANIC_API_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('results'):
+            # Retorna uma lista dos títulos das notícias
+            return [post['title'] for post in data['results']]
+        return []
+        
     except Exception as e:
-        return f"Erro ao buscar notícia: {e}"
+        print(f"⚠️ Erro ao buscar notícias para {symbol}: {e}")
+        return []
