@@ -46,3 +46,6 @@ def generate_signal(pair, df, indicators):
 
     send_signal_notification(signal)
     return signal
+
+# Alias para manter compatibilidade com scanner.py
+analisar_sinal = generate_signal
