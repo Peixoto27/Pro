@@ -1,5 +1,7 @@
-# scanner.py
-from price_fetcher import fetch_all_data
+# scanner.py (Versão Otimizada e Final)
+import pandas as pd
+import ta
+from price_fetcher import fetch_all_raw_data
 from technical_indicators import calculate_indicators
 from signal_generator import generate_signal
 from state_manager import ler_trades_abertos, salvar_trades_abertos
@@ -12,86 +14,90 @@ SYMBOLS = [
     "OPUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT", "SEIUSDT"
 ]
 
-def monitorar_trades_abertos(trades_abertos, df_mercado_atual):
-    """Verifica se algum trade aberto atingiu o alvo ou o stop."""
-    trades_fechados = []
-    for symbol, trade_info in trades_abertos.items():
-        if symbol not in df_mercado_atual:
-            continue
+# --- CHAVE DE ATIVAÇÃO PARA MTA ---
+USAR_MTA = True
 
-        df_ativo = df_mercado_atual[symbol]
-        preco_atual = df_ativo['close'].iloc[-1]
+def get_macro_trend(df_raw):
+    """Calcula a tendência macro a partir dos dados brutos, reamostrando para 4h."""
+    if df_raw is None or df_raw.empty:
+        return "NEUTRA"
+    
+    df_4h = df_raw.set_index('timestamp').resample('4h').last().dropna().reset_index()
+    
+    if len(df_4h) < 50:
+        return "NEUTRA"
         
-        alvo = float(trade_info['target_price'])
-        stop = float(trade_info['stop_loss'])
-        
-        # Lógica para trade de COMPRA
-        if trade_info['signal_type'] == 'COMPRA':
-            if preco_atual >= alvo:
-                print(f"✅ ALVO ATINGIDO para {symbol}!")
-                send_take_profit_notification(trade_info, preco_atual)
-                trades_fechados.append(symbol)
-            elif preco_atual <= stop:
-                print(f"❌ STOP ATINGIDO para {symbol}!")
-                send_stop_loss_notification(trade_info, preco_atual)
-                trades_fechados.append(symbol)
+    df_4h['SMA_50'] = ta.trend.SMAIndicator(close=df_4h['close'], window=50).sma_indicator()
+    
+    ultimo_preco = df_4h['close'].iloc[-1]
+    ultima_sma = df_4h['SMA_50'].iloc[-1]
 
-        # Lógica para trade de VENDA
-        elif trade_info['signal_type'] == 'VENDA':
-            if preco_atual <= alvo:
-                print(f"✅ ALVO ATINGIDO para {symbol}!")
-                send_take_profit_notification(trade_info, preco_atual)
-                trades_fechados.append(symbol)
-            elif preco_atual >= stop:
-                print(f"❌ STOP ATINGIDO para {symbol}!")
-                send_stop_loss_notification(trade_info, preco_atual)
-                trades_fechados.append(symbol)
-
-    # Remove os trades que foram fechados do dicionário principal
-    for symbol in trades_fechados:
-        del trades_abertos[symbol]
-
-def buscar_novos_sinais(trades_abertos, df_mercado_atual):
-    """Busca por novos sinais apenas para os ativos que não têm trade aberto."""
-    for symbol, df in df_mercado_atual.items():
-        if symbol in trades_abertos:
-            print(f"⚪ {symbol} já tem um trade em andamento. Ignorando busca por novo sinal.")
-            continue
-
-        try:
-            df_com_indicadores = calculate_indicators(df)
-            if df_com_indicadores is not None and not df_com_indicadores.empty:
-                novo_sinal = generate_signal(df_com_indicadores, symbol)
-                if novo_sinal:
-                    print(f"📢 Novo sinal encontrado para {symbol}! Adicionando ao monitoramento.")
-                    trades_abertos[symbol] = novo_sinal
-                    send_signal_notification(novo_sinal)
-        except Exception as e:
-            print(f"❌ Erro crítico ao processar {symbol} para novo sinal: {e}")
+    if ultimo_preco > ultima_sma:
+        return "ALTA"
+    elif ultimo_preco < ultima_sma:
+        return "BAIXA"
+    return "NEUTRA"
 
 def main():
-    """Função principal que orquestra o scanner."""
     print("🤖 Iniciando ciclo do robô de sinais...")
-
-    # 1. Carrega o estado atual (trades que já estão abertos)
     trades_abertos = ler_trades_abertos()
     print(f"🔍 Trades em monitoramento: {list(trades_abertos.keys())}")
 
-    # 2. Busca os dados de mercado mais recentes para todos os ativos
-    df_mercado_atual = fetch_all_data(SYMBOLS)
-    if not df_mercado_atual:
+    # 1. Busca os dados brutos UMA ÚNICA VEZ
+    dados_brutos_mercado = fetch_all_raw_data(SYMBOLS)
+    if not dados_brutos_mercado:
         print("🔴 Não foi possível buscar dados de mercado. Encerrando ciclo.")
         return
 
-    # 3. Monitora os trades que já estavam abertos
+    # --- FASE 1: Monitorar Trades Abertos ---
     print("\n📊 Fase 1: Monitorando trades existentes...")
-    monitorar_trades_abertos(trades_abertos, df_mercado_atual)
+    trades_fechados = []
+    for symbol, trade_info in trades_abertos.items():
+        if symbol not in dados_brutos_mercado:
+            continue
+        
+        preco_atual = dados_brutos_mercado[symbol]['close'].iloc[-1]
+        alvo = float(trade_info['target_price'])
+        stop = float(trade_info['stop_loss'])
 
-    # 4. Busca por novos sinais nos ativos que não estão em operação
+        # ... (lógica de verificação de alvo/stop continua a mesma)
+        if (trade_info['signal_type'] == 'COMPRA' and preco_atual >= alvo) or \
+           (trade_info['signal_type'] == 'VENDA' and preco_atual <= alvo):
+            print(f"✅ ALVO ATINGIDO para {symbol}!")
+            send_take_profit_notification(trade_info, preco_atual)
+            trades_fechados.append(symbol)
+        elif (trade_info['signal_type'] == 'COMPRA' and preco_atual <= stop) or \
+             (trade_info['signal_type'] == 'VENDA' and preco_atual >= stop):
+            print(f"❌ STOP ATINGIDO para {symbol}!")
+            send_stop_loss_notification(trade_info, preco_atual)
+            trades_fechados.append(symbol)
+            
+    for symbol in trades_fechados:
+        del trades_abertos[symbol]
+
+    # --- FASE 2: Buscar Novos Sinais ---
     print("\n🔎 Fase 2: Buscando por novos sinais...")
-    buscar_novos_sinais(trades_abertos, df_mercado_atual)
+    for symbol, df_raw in dados_brutos_mercado.items():
+        if symbol in trades_abertos:
+            print(f"⚪ {symbol} já tem um trade em andamento.")
+            continue
 
-    # 5. Salva o estado final (com novos trades adicionados ou antigos removidos)
+        # Define a tendência macro usando os dados brutos
+        tendencia_macro = get_macro_trend(df_raw) if USAR_MTA else "NEUTRA"
+        print(f"🔮 Tendência MACRO para {symbol} é: {tendencia_macro}")
+
+        # Cria o dataframe de 1h para os indicadores
+        df_1h = df_raw.set_index('timestamp').resample('1h').last().ffill().dropna().reset_index()
+        
+        df_com_indicadores = calculate_indicators(df_1h)
+        
+        if df_com_indicadores is not None and not df_com_indicadores.empty:
+            novo_sinal = generate_signal(df_com_indicadores, symbol, tendencia_macro) # Passa a tendência como argumento
+            if novo_sinal:
+                print(f"📢 Novo sinal encontrado para {symbol}! Adicionando ao monitoramento.")
+                trades_abertos[symbol] = novo_sinal
+                send_signal_notification(novo_sinal)
+
     salvar_trades_abertos(trades_abertos)
     print("\n💾 Estado atualizado salvo. Ciclo concluído.")
 
