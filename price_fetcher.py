@@ -1,29 +1,32 @@
 import requests
 import pandas as pd
-import time
+import datetime as dt
 
 def fetch_price_data(symbol):
     try:
-        # Tenta Binance primeiro
-        binance_url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
-        res = requests.get(binance_url, timeout=5)
+        end_time = int(dt.datetime.utcnow().timestamp() * 1000)
+        start_time = end_time - (60 * 60 * 1000 * 24)  # 24 horas
+
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1m&startTime={start_time}&endTime={end_time}"
+        res = requests.get(url, timeout=10)
+        
         if res.status_code == 200:
-            data = res.json()
-            return pd.DataFrame([{
-                "timestamp": pd.Timestamp.utcnow(),
-                "price": float(data["lastPrice"]),
-                "volume": float(data["quoteVolume"]),
-                "price_change_percent": float(data["priceChangePercent"])
-            }])
-        elif res.status_code == 451:
+            raw = res.json()
+            df = pd.DataFrame(raw, columns=[
+                "timestamp", "open", "high", "low", "close", "volume",
+                "_", "_", "_", "_", "_", "_"
+            ])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(float)
+            return df[["timestamp", "open", "high", "low", "close", "volume"]]
+
+        elif res.status_code == 451 or res.status_code == 429:
             print(f"🔁 Binance bloqueada para {symbol}. Usando CoinGecko...")
-        else:
-            print(f"⚠️ Erro Binance para {symbol}: {res.status_code}")
 
     except Exception as e:
         print(f"❌ Erro Binance para {symbol}: {e}")
 
-    # Fallback CoinGecko
+    # CoinGecko fallback
     try:
         cg_ids = {
             'BTCUSDT': 'bitcoin',
@@ -38,34 +41,34 @@ def fetch_price_data(symbol):
             'TONUSDT': 'toncoin',
             'INJUSDT': 'injective-protocol',
             'RNDRUSDT': 'render-token',
-            'ARBUSDT': 'arbitrum'
+            'ARBUSDT': 'arbitrum',
         }
 
         coin_id = cg_ids.get(symbol)
         if not coin_id:
             return None
 
-        cg_url = f"https://api.coingecko.com/api/v3/coins/{coin_id}?localization=false&tickers=false&market_data=true"
-        res = requests.get(cg_url, timeout=5)
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=1&interval=minutely"
+        res = requests.get(url, timeout=10)
         if res.status_code == 200:
-            coin = res.json()["market_data"]
-            df = pd.DataFrame([{
-                "timestamp": pd.Timestamp.utcnow(),
-                "price": coin["current_price"]["usd"],
-                "volume": coin["total_volume"]["usd"],
-                "price_change_percent": coin["price_change_percentage_24h"]
-            }])
+            data = res.json()
+            prices = data["prices"]
+            volumes = data["total_volumes"]
 
-            # Simulando histórico com uma linha, mas aplicando o mesmo tratamento
-            df = (
-                df.set_index("timestamp")
-                .resample("1h")
-                .mean()
-                .ffill()
-                .reset_index()
-            )
+            timestamps = [dt.datetime.utcfromtimestamp(p[0] / 1000) for p in prices]
+            closes = [p[1] for p in prices]
+            vols = [v[1] for v in volumes]
 
-            time.sleep(2)  # para evitar bloqueio da CoinGecko
+            df = pd.DataFrame({
+                "timestamp": timestamps,
+                "close": closes,
+                "volume": vols
+            })
+            # Preencher colunas ausentes
+            df["open"] = df["close"]
+            df["high"] = df["close"]
+            df["low"] = df["close"]
+            df = df[["timestamp", "open", "high", "low", "close", "volume"]]
             return df
 
         else:
