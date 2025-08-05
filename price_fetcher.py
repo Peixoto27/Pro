@@ -22,7 +22,7 @@ SYMBOL_TO_ID = {
     "PEPEUSDT": "pepe", "SEIUSDT": "sei-network"
 }
 
-def fetch_historical_data_coingecko(symbol, days=2):
+def fetch_historical_data_coingecko(symbol, days=4): # <-- CORREÇÃO APLICADA AQUI
     """Busca dados históricos de uma moeda específica no CoinGecko."""
     coin_id = SYMBOL_TO_ID.get(symbol)
     if not coin_id:
@@ -31,9 +31,6 @@ def fetch_historical_data_coingecko(symbol, days=2):
 
     url = f"{COINGECKO_BASE_URL}/coins/{coin_id}/market_chart"
     
-    # --- CORREÇÃO FINAL ---
-    # O parâmetro 'interval' foi removido.
-    # A API retornará dados horários por padrão se 'days' estiver entre 2 e 90.
     params = {
         "vs_currency": "usd",
         "days": days
@@ -78,7 +75,6 @@ def fetch_all_data(symbols):
         df = fetch_historical_data_coingecko(symbol)
         if df is not None and not df.empty:
             all_data[symbol] = df
-            # Adiciona uma mensagem de sucesso para melhor feedback
             print(f"✅ Dados de {symbol} recebidos com sucesso.")
         else:
             print(f"⚠️ Dados indisponíveis para {symbol}. Pulando...")
