@@ -21,10 +21,10 @@ def calculate_indicators(df):
     sma = df["close"].rolling(window=20).mean()
     std = df["close"].rolling(window=20).std()
     lower_band = sma - 2 * std
-    bollinger_position = "lower breakout" if df["close"].iloc[-1] < lower_band.iloc[-1] else "inside bands"
+    boll_position = "lower breakout" if df["close"].iloc[-1] < lower_band.iloc[-1] else "inside bands"
 
     return {
         "RSI": round(rsi.iloc[-1], 2),
         "MACD": macd_trend,
-        "BOLL": bollinger_position
+        "BOLL": boll_position
     }
