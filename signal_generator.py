@@ -1,21 +1,10 @@
-# signal_generator.py (com Análise de Múltiplos Timeframes)
+# signal_generator.py (Versão Otimizada)
 import pandas as pd
 import datetime
-from mta_analyzer import get_macro_trend # Importa nossa nova função
 
-# --- CHAVE DE ATIVAÇÃO ---
-# Mude para False para desligar a análise de múltiplos timeframes e voltar ao comportamento original
-USAR_MTA = True
-
-def generate_signal(df_with_indicators, symbol):
+def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA"): # Recebe a tendência
     if df_with_indicators is None or df_with_indicators.empty:
         return None
-
-    # --- Filtro de Análise de Múltiplos Timeframes (MTA) ---
-    if USAR_MTA:
-        tendencia_macro = get_macro_trend(symbol)
-    else:
-        tendencia_macro = "NEUTRA" # Se desligado, permite qualquer trade
 
     latest_data = df_with_indicators.iloc[-1]
     sma_short = latest_data.get('SMA_20')
@@ -29,12 +18,10 @@ def generate_signal(df_with_indicators, symbol):
     signal_type = None
     confidence_score = 0
 
-    # Condição de COMPRA: só gera sinal se a tendência macro for de ALTA ou NEUTRA
+    # A lógica agora usa a tendência recebida como parâmetro
     if sma_short > sma_long and rsi < 70 and (tendencia_macro == "ALTA" or tendencia_macro == "NEUTRA"):
         signal_type = "COMPRA"
         confidence_score = 50 + (70 - rsi)
-    
-    # Condição de VENDA: só gera sinal se a tendência macro for de BAIXA ou NEUTRA
     elif sma_short < sma_long and rsi > 30 and (tendencia_macro == "BAIXA" or tendencia_macro == "NEUTRA"):
         signal_type = "VENDA"
         confidence_score = 50 + (rsi - 30)
@@ -56,7 +43,7 @@ def generate_signal(df_with_indicators, symbol):
             "expected_profit_percent": f"{expected_profit_percent:.2f}",
             "expected_profit_usdt": f"{(expected_profit_percent/100 * 1000):.2f} (em lote de 1000 USDT)",
             "news_summary": "Análise técnica baseada em indicadores.",
-            "strategy": "Cruzamento de Médias Móveis com RSI + Filtro MTA", "timeframe": "1 Hora",
+            "strategy": "Cruzamento de Médias Móveis com Filtro MTA", "timeframe": "1 Hora",
             "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         return signal_dict
