@@ -1,28 +1,25 @@
-# signal_generator.py (Versão Final com Stop Dinâmico ATR)
+# signal_generator.py (Versão Otimizada que recebe o sentimento)
 import pandas as pd
 import datetime
-from sentiment_analyzer import get_sentiment_score
+# REMOVEMOS o import do sentiment_analyzer daqui
 
 # --- CHAVES DE ATIVAÇÃO ---
 USAR_MTA = True
 USAR_SENTIMENTO = True
-USAR_STOP_DINAMICO_ATR = True # <<< NOSSA NOVA CHAVE!
+USAR_STOP_DINAMICO_ATR = True
 
-def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA"):
+# A função agora aceita 'sentiment_score' como um argumento
+def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA", sentiment_score=0.0):
     if df_with_indicators is None or len(df_with_indicators) < 2:
         return None
 
-    if USAR_SENTIMENTO:
-        sentiment_score = get_sentiment_score(symbol)
-    else:
-        sentiment_score = 0
+    # A lógica de buscar o sentimento foi removida daqui.
+    # Usamos diretamente o valor que foi passado para a função.
 
     latest_data = df_with_indicators.iloc[-1]
-    
-    # Extrai todos os valores necessários, incluindo o novo ATR
+    # ... (o resto do arquivo continua exatamente o mesmo)
     current_price = latest_data.get('close')
-    atr_value = latest_data.get('ATR_14') # Pega o valor do ATR
-    # ... (outros indicadores)
+    atr_value = latest_data.get('ATR_14')
     sma_short = latest_data.get('SMA_20')
     sma_long = latest_data.get('SMA_50')
     rsi = latest_data.get('RSI')
@@ -31,7 +28,6 @@ def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA"):
     current_volume = latest_data.get('volume')
     volume_sma = latest_data.get('Volume_SMA_20')
 
-    # Verifica se todos os dados necessários existem
     if any(v is None for v in [current_price, atr_value, sma_short, sma_long, rsi, macd_line, macd_signal_line, current_volume, volume_sma]):
         return None
 
@@ -58,34 +54,25 @@ def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA"):
         signal_type = "VENDA"
 
     if signal_type:
-        # --- LÓGICA DE GESTÃO DE RISCO (FIXA vs. DINÂMICA) ---
         risk_reward_ratio = 2.0
-        
         if USAR_STOP_DINAMICO_ATR and atr_value > 0:
-            # --- GESTÃO DE RISCO DINÂMICA COM ATR ---
-            multiplicador_atr_stop = 2.0 # Fator de multiplicação para o stop (ajustável)
-            
+            multiplicador_atr_stop = 2.0
             if signal_type == "COMPRA":
                 stop_loss = current_price - (atr_value * multiplicador_atr_stop)
                 target_price = current_price + (current_price - stop_loss) * risk_reward_ratio
-            else: # VENDA
+            else:
                 stop_loss = current_price + (atr_value * multiplicador_atr_stop)
                 target_price = current_price - (stop_loss - current_price) * risk_reward_ratio
-            
             strategy_name = "Confluência Total + ATR Stop"
         else:
-            # --- GESTÃO DE RISCO FIXA (Nosso método antigo como fallback) ---
             if signal_type == "COMPRA":
                 stop_loss = current_price * 0.98
                 target_price = current_price + (current_price - stop_loss) * risk_reward_ratio
-            else: # VENDA
+            else:
                 stop_loss = current_price * 1.02
                 target_price = current_price - (stop_loss - current_price) * risk_reward_ratio
-            
             strategy_name = "Confluência Total (Stop Fixo)"
 
-        # --- CÁLCULO DE CONFIANÇA E CRIAÇÃO DO SINAL ---
-        # (O resto do código continua o mesmo)
         confianca_rsi = (70 - rsi) if signal_type == "COMPRA" else (rsi - 30)
         confianca_macd = abs(macd_line - macd_signal_line) * 10
         score_rsi = min(max(confianca_rsi * 2.5, 0), 100)
@@ -106,5 +93,4 @@ def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA"):
                 "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             return signal_dict
-
     return None
