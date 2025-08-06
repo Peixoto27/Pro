@@ -1,74 +1,76 @@
-# notifier.py
+# notifier.py (Versão Final e Completa)
 import requests
 import os
 
-# Carregando as credenciais de variáveis de ambiente para mais segurança
-BOT_TOKEN = os.getenv("BOT_TOKEN", "7360602779:AAFIpncv7fkXaEX5PdWdEAUBb7NQ9SeA-F0")
-CHAT_ID = os.getenv("CHAT_ID", "@botsinaistop")
+# Pega as credenciais das variáveis de ambiente para segurança
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def send_signal_notification(signal):
-    """Envia a notificação de um NOVO SINAL encontrado."""
+    """Envia a notificação de um NOVO sinal para o Telegram."""
+    if not BOT_TOKEN or not CHAT_ID:
+        print("❌ Credenciais do Telegram não configuradas. Não é possível enviar o sinal.")
+        return
+
     try:
+        # Mensagem formatada para um novo sinal
         text = (
-            f"📢 **Novo Sinal Detectado**\n\n"
-            f"🪙 **Ativo:** {signal['symbol']}\n"
-            f"📈 **Tipo:** {signal['signal_type']}\n\n"
-            f"🎯 **Entrada:** `{signal['entry_price']}`\n"
-            f"✅ **Alvo (Lucro):** `{signal['target_price']}`\n"
-            f"❌ **Stop (Perda):** `{signal['stop_loss']}`\n\n"
+            f"📢 **Novo Sinal: {signal['symbol']}**\n\n"
+            f"📈 **Tipo:** {signal['signal_type']}\n"
+            f"💰 **Entrada:** `{signal['entry_price']}`\n\n"
+            f"🎯 **Alvo:** `{signal['target_price']}` (+{signal['expected_profit_percent']}%)\n"
+            f"🛑 **Stop:** `{signal['stop_loss']}`\n\n"
             f"📊 **Risco/Retorno:** {signal['risk_reward']}\n"
-            f"💡 **Confiança:** {signal['confidence_score']}%\n"
-            f"💰 **Lucro Estimado:** {signal['expected_profit_percent']}%\n\n"
-            f"🔍 **Estratégia:** {signal['strategy']} ({signal['timeframe']})"
+            f"🧠 **Confiança:** {signal['confidence_score']}%\n"
+            f"📰 **Info:** {signal['news_summary']}\n"
+            f"⚙️ **Estratégia:** {signal['strategy']}"
         )
-        _send_message(text)
-        print(f"✅ Notificação de novo sinal para {signal['symbol']} enviada ao Telegram.")
-    except Exception as e:
-        print(f"❌ Erro no envio da notificação de novo sinal: {e}")
 
-def send_take_profit_notification(trade, current_price):
-    """Envia a notificação de que o ALVO (Take Profit) foi atingido."""
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "Markdown" # Habilita o uso de negrito, itálico, etc.
+        }
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            print(f"✅ Notificação de novo sinal para {signal['symbol']} enviada ao Telegram.")
+        else:
+            print(f"❌ Erro ao enviar sinal para o Telegram: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"❌ Erro crítico no envio para o Telegram: {e}")
+
+# --- FUNÇÃO QUE ESTAVA FALTANDO ---
+def send_trade_update_notification(symbol, status, trade_info):
+    """Envia a notificação de ATUALIZAÇÃO de um trade (lucro/perda)."""
+    if not BOT_TOKEN or not CHAT_ID:
+        print("❌ Credenciais do Telegram não configuradas. Não é possível enviar a atualização.")
+        return
+
+    status_emoji = "✅" if "LUCRO" in status else "❌"
+    
     try:
-        profit_percent = abs((float(trade['target_price']) - float(trade['entry_price'])) / float(trade['entry_price'])) * 100
+        # Mensagem formatada para a atualização do trade
         text = (
-            f"✅ **ALVO ATINGIDO! (LUCRO)** ✅\n\n"
-            f"🪙 **Ativo:** {trade['symbol']}\n"
-            f"📈 **Tipo:** {trade['signal_type']}\n\n"
-            f"🔹 **Preço de Entrada:** `{trade['entry_price']}`\n"
-            f"🎯 **Preço do Alvo:** `{trade['target_price']}`\n"
-            f"📈 **Preço Atual:** `{current_price:.4f}`\n\n"
-            f"💰 **Lucro Realizado:** +{profit_percent:.2f}%"
+            f"{status_emoji} **Atualização de Trade: {symbol}**\n\n"
+            f"**Status:** {status}\n\n"
+            f"**Sinal Original:**\n"
+            f"  - Tipo: {trade_info['signal_type']}\n"
+            f"  - Entrada: `{trade_info['entry_price']}`\n"
+            f"  - Alvo: `{trade_info['target_price']}`\n"
+            f"  - Stop: `{trade_info['stop_loss']}`"
         )
-        _send_message(text)
-        print(f"✅ Notificação de ALVO ATINGIDO para {trade['symbol']} enviada ao Telegram.")
-    except Exception as e:
-        print(f"❌ Erro no envio da notificação de alvo atingido: {e}")
 
-def send_stop_loss_notification(trade, current_price):
-    """Envia a notificação de que o STOP (Stop Loss) foi atingido."""
-    try:
-        loss_percent = abs((float(trade['stop_loss']) - float(trade['entry_price'])) / float(trade['entry_price'])) * 100
-        text = (
-            f"❌ **STOP ATINGIDO! (PERDA)** ❌\n\n"
-            f"🪙 **Ativo:** {trade['symbol']}\n"
-            f"📉 **Tipo:** {trade['signal_type']}\n\n"
-            f"🔹 **Preço de Entrada:** `{trade['entry_price']}`\n"
-            f"🚫 **Preço do Stop:** `{trade['stop_loss']}`\n"
-            f"📉 **Preço Atual:** `{current_price:.4f}`\n\n"
-            f"💸 **Perda Realizada:** -{loss_percent:.2f}%"
-        )
-        _send_message(text)
-        print(f"✅ Notificação de STOP ATINGIDO para {trade['symbol']} enviada ao Telegram.")
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "Markdown"
+        }
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            print(f"✅ Notificação de atualização para {symbol} enviada ao Telegram.")
+        else:
+            print(f"❌ Erro ao enviar atualização para o Telegram: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"❌ Erro no envio da notificação de stop atingido: {e}")
-
-def _send_message(text):
-    """Função interna para enviar a mensagem para a API do Telegram."""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown"  # Habilita o uso de negrito, itálico, etc.
-    }
-    response = requests.post(url, json=payload)
-    response.raise_for_status() # Lança um erro se a requisição falhar
+        print(f"❌ Erro crítico no envio da atualização para o Telegram: {e}")
