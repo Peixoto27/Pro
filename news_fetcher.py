@@ -1,40 +1,52 @@
-# news_fetcher.py (Versão Final Simplificada e Correta)
+# news_fetcher.py (Versão com NewsAPI)
 import requests
 import os
+from datetime import datetime, timedelta
 
-# URL base, limpa, sem '?' ou parâmetros
-CRYPTOPANIC_API_URL = "https://cryptopanic.com/api/v1/posts/"
+# URL base da NewsAPI
+NEWS_API_URL = "https://newsapi.org/v2/everything"
 
 def get_recent_news(symbol):
-    """Busca as notícias mais recentes para um símbolo de moeda específico."""
+    """Busca as notícias mais recentes para um símbolo usando a NewsAPI."""
+    
+    # Pega a chave de API das variáveis de ambiente
+    api_key = os.getenv("NEWS_API_KEY")
+    
+    if not api_key:
+        print("⚠️ Chave da NewsAPI não encontrada. Pulando análise de sentimento.")
+        return []
+
+    # Formata o termo de busca (ex: 'BTCUSDT' -> 'Bitcoin OR BTC')
+    currency_name = symbol.replace("USDT", "").lower()
     currency_code = symbol.replace("USDT", "")
+    query = f'"{currency_name}" OR "{currency_code}"'
     
-    # --- CORREÇÃO FINAL APLICADA AQUI ---
-    
-    # 1. Busca a chave da API. Se não existir, api_key será None.
-    api_key = os.getenv("CRYPTOPANIC_API_KEY")
-    
-    # 2. Monta o dicionário de parâmetros.
-    #    Se a chave NÃO existir, o dicionário fica VAZIO, acessando o endpoint público.
-    #    Se a chave EXISTIR, ela é adicionada, acessando o endpoint privado.
+    # Busca notícias das últimas 24 horas para manter a relevância
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S')
+
     params = {
-        "auth_token": api_key,
-        "currencies": currency_code
-    } if api_key else {
-        "currencies": currency_code
+        'q': query,
+        'apiKey': api_key,
+        'language': 'en',       # Busca notícias em inglês para melhor análise de sentimento
+        'sortBy': 'relevancy',  # Prioriza as notícias mais relevantes
+        'from': yesterday,
+        'pageSize': 20          # Pega até 20 notícias para analisar
     }
     
     try:
-        # A biblioteca 'requests' vai montar a URL corretamente a partir daqui.
-        response = requests.get(CRYPTOPANIC_API_URL, params=params)
+        response = requests.get(NEWS_API_URL, params=params)
         response.raise_for_status()
         data = response.json()
         
-        if data.get('results'):
-            return [post['title'] for post in data['results']]
-        return []
+        if data.get('status') == 'ok' and data.get('articles'):
+            # Retorna uma lista dos títulos dos artigos
+            return [article['title'] for article in data['articles']]
+        else:
+            # Imprime o erro se a API retornar um status de falha
+            if data.get('status') == 'error':
+                print(f"⚠️ Erro da NewsAPI para {symbol}: {data.get('message')}")
+            return []
         
     except Exception as e:
-        # Imprime a URL exata que falhou para depuração final.
-        print(f"❌ Erro ao buscar notícias para {symbol}. URL: {response.url}. Erro: {e}")
+        print(f"❌ Erro crítico ao buscar notícias para {symbol}: {e}")
         return []
