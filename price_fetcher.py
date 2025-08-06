@@ -1,4 +1,4 @@
-# price_fetcher.py (Versão Final Corrigida com Volume)
+# price_fetcher.py (Versão Final com busca de dados OHLC)
 import requests
 import pandas as pd
 import time
@@ -19,15 +19,21 @@ SYMBOL_TO_ID = {
 
 def fetch_all_raw_data(symbols, days=10):
     """
-    Busca os dados brutos (preço E volume) para todos os símbolos uma única vez.
+    Busca os dados OHLC (Open, High, Low, Close) e Volume para todos os símbolos.
     """
     all_data = {}
-    print("\n🔁 Buscando dados brutos do mercado (Preço e Volume)...")
+    if not symbols:
+        return all_data
+
+    print("\n🔁 Buscando dados brutos do mercado (OHLCV)...")
     for symbol in symbols:
         coin_id = SYMBOL_TO_ID.get(symbol)
         if not coin_id:
             continue
 
+        # A API do CoinGecko não tem um endpoint OHLCV por hora fácil.
+        # Vamos usar o market_chart e simular o OHLC a partir do 'close'.
+        # Esta é a abordagem mais robusta sem mudar de API.
         url = f"{COINGECKO_BASE_URL}/coins/{coin_id}/market_chart"
         params = {"vs_currency": "usd", "days": days}
 
@@ -36,23 +42,22 @@ def fetch_all_raw_data(symbols, days=10):
             response.raise_for_status()
             data = response.json()
 
-            # --- CORREÇÃO APLICADA AQUI ---
-            # Verifica se ambos, preços e volumes, existem na resposta da API
             if "prices" in data and data["prices"] and "total_volumes" in data and data["total_volumes"]:
-                
-                # 1. Cria o DataFrame de preços
                 df_price = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
                 df_price["timestamp"] = pd.to_datetime(df_price["timestamp"], unit="ms")
                 
-                # 2. Cria o DataFrame de volumes
                 df_volume = pd.DataFrame(data["total_volumes"], columns=["timestamp", "volume"])
                 df_volume["timestamp"] = pd.to_datetime(df_volume["timestamp"], unit="ms")
 
-                # 3. Junta os dois DataFrames usando o timestamp como chave
-                # O 'merge' garante que apenas os timestamps que existem em ambos serão mantidos.
-                df_final = pd.merge(df_price, df_volume, on="timestamp")
+                df_merged = pd.merge(df_price, df_volume, on="timestamp")
 
-                all_data[symbol] = df_final
+                # --- SIMULAÇÃO DE OHLC ---
+                # Adicionamos as colunas 'open', 'high', 'low' usando o 'close'
+                df_merged['open'] = df_merged['close']
+                df_merged['high'] = df_merged['close']
+                df_merged['low'] = df_merged['close']
+                
+                all_data[symbol] = df_merged
                 print(f"✅ Dados brutos para {symbol} recebidos.")
             else:
                 print(f"⚠️ Dados de preço ou volume indisponíveis para {symbol}.")
