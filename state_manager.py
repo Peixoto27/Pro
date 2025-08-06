@@ -1,36 +1,40 @@
-# state_manager.py
+# state_manager.py (Versão Final e Correta)
 import json
 import os
 
-# O nome do nosso arquivo de "memória"
-STATE_FILE = "trades_abertos.json"
+# Define o nome do arquivo que guardará nosso "estado" ou "memória"
+STATE_FILE = 'trades_abertos.json'
 
-def ler_trades_abertos():
+def save_open_trades(trades_dict):
     """
-    Lê o arquivo JSON e retorna um dicionário de trades abertos.
-    Se o arquivo não existir ou estiver vazio, retorna um dicionário vazio.
+    Salva o dicionário de trades abertos em um arquivo JSON.
+    Esta função se chama 'save_open_trades', como o scanner espera.
     """
-    # Garante que o arquivo exista, mesmo que vazio
-    if not os.path.exists(STATE_FILE):
+    try:
         with open(STATE_FILE, 'w') as f:
-            json.dump({}, f)
-        return {}
+            json.dump(trades_dict, f, indent=4)
+    except Exception as e:
+        print(f"❌ Erro ao salvar o estado dos trades: {e}")
+
+def load_open_trades():
+    """
+    Carrega o dicionário de trades abertos do arquivo JSON.
+    Esta função se chama 'load_open_trades', como o scanner espera.
+    """
+    # Verifica se o arquivo de estado existe
+    if not os.path.exists(STATE_FILE):
+        return {}  # Retorna um dicionário vazio se for a primeira execução
 
     try:
         with open(STATE_FILE, 'r') as f:
-            # Se o arquivo estiver vazio, o json.load falha, então tratamos isso
-            if os.path.getsize(STATE_FILE) == 0:
+            # Se o arquivo estiver vazio, retorna um dicionário vazio para evitar erros
+            content = f.read()
+            if not content:
                 return {}
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        # Em caso de erro de leitura ou arquivo corrompido, retorna um estado seguro (vazio)
+            return json.loads(content)
+    except json.JSONDecodeError:
+        print("⚠️ Arquivo de estado corrompido ou vazio. Começando com um novo estado.")
+        return {} # Retorna um dicionário vazio se o arquivo estiver malformado
+    except Exception as e:
+        print(f"❌ Erro ao carregar o estado dos trades: {e}")
         return {}
-
-def salvar_trades_abertos(trades):
-    """
-    Recebe um dicionário de trades e o salva no arquivo JSON.
-    """
-    with open(STATE_FILE, 'w') as f:
-        # 'indent=4' torna o arquivo JSON legível para humanos, o que é ótimo para depuração
-        json.dump(trades, f, indent=4)
-
