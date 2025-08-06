@@ -5,7 +5,7 @@ from sentiment_analyzer import get_sentiment_score # Importa nossa nova função
 
 # --- CHAVES DE ATIVAÇÃO ---
 USAR_MTA = True
-USAR_SENTIMENTO = False # Nosso novo interruptor!
+USAR_SENTIMENTO = True # Nosso novo interruptor!
 
 def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA"):
     if df_with_indicators is None or len(df_with_indicators) < 2:
