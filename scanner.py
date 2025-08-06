@@ -1,105 +1,118 @@
-# scanner.py (Versão Otimizada e Final)
+    # scanner.py (Versão Final Otimizada)
 import pandas as pd
-import ta
+import time
 from price_fetcher import fetch_all_raw_data
 from technical_indicators import calculate_indicators
 from signal_generator import generate_signal
-from state_manager import ler_trades_abertos, salvar_trades_abertos
-from notifier import send_signal_notification, send_take_profit_notification, send_stop_loss_notification
+from notifier import send_signal_notification, send_trade_update_notification
+from state_manager import load_open_trades, save_open_trades
+from sentiment_analyzer import get_sentiment_score # Importamos aqui!
 
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
-    "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "TONUSDT",
-    "INJUSDT", "RNDRUSDT", "ARBUSDT", "LTCUSDT", "MATICUSDT",
-    "OPUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT", "SEIUSDT"
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", 
+    "AVAXUSDT", "DOTUSDT", "LINKUSDT", "TONUSDT", "INJUSDT", "RNDRUSDT", 
+    "ARBUSDT", "LTCUSDT", "MATICUSDT", "OPUSDT", "NEARUSDT", "APTUSDT", 
+    "PEPEUSDT", "SEIUSDT"
 ]
 
-# --- CHAVE DE ATIVAÇÃO PARA MTA ---
-USAR_MTA = True
-
-def get_macro_trend(df_raw):
-    """Calcula a tendência macro a partir dos dados brutos, reamostrando para 4h."""
-    if df_raw is None or df_raw.empty:
-        return "NEUTRA"
+def run_scanner():
+    print("\n--- Iniciando novo ciclo de varredura ---")
     
-    df_4h = df_raw.set_index('timestamp').resample('4h').last().dropna().reset_index()
-    
-    if len(df_4h) < 50:
-        return "NEUTRA"
-        
-    df_4h['SMA_50'] = ta.trend.SMAIndicator(close=df_4h['close'], window=50).sma_indicator()
-    
-    ultimo_preco = df_4h['close'].iloc[-1]
-    ultima_sma = df_4h['SMA_50'].iloc[-1]
-
-    if ultimo_preco > ultima_sma:
-        return "ALTA"
-    elif ultimo_preco < ultima_sma:
-        return "BAIXA"
-    return "NEUTRA"
-
-def main():
-    print("🤖 Iniciando ciclo do robô de sinais...")
-    trades_abertos = ler_trades_abertos()
-    print(f"🔍 Trades em monitoramento: {list(trades_abertos.keys())}")
-
-    # 1. Busca os dados brutos UMA ÚNICA VEZ
-    dados_brutos_mercado = fetch_all_raw_data(SYMBOLS)
-    if not dados_brutos_mercado:
-        print("🔴 Não foi possível buscar dados de mercado. Encerrando ciclo.")
-        return
-
-    # --- FASE 1: Monitorar Trades Abertos ---
+    # FASE 1: Monitorar Trades Existentes
     print("\n📊 Fase 1: Monitorando trades existentes...")
-    trades_fechados = []
-    for symbol, trade_info in trades_abertos.items():
-        if symbol not in dados_brutos_mercado:
+    open_trades = load_open_trades()
+    trades_to_remove = []
+    
+    raw_data = fetch_all_raw_data(list(open_trades.keys()))
+    
+    for symbol, trade_info in open_trades.items():
+        df_raw = raw_data.get(symbol)
+        if df_raw is None or df_raw.empty:
             continue
         
-        preco_atual = dados_brutos_mercado[symbol]['close'].iloc[-1]
-        alvo = float(trade_info['target_price'])
-        stop = float(trade_info['stop_loss'])
+        df_1h = df_raw.set_index('timestamp').resample('1H').agg({
+            'close': 'last', 'high': 'max', 'low': 'min', 'volume': 'sum'
+        }).dropna().reset_index()
+        
+        current_price = df_1h.iloc[-1]['close']
+        
+        if trade_info['signal_type'] == 'COMPRA':
+            if current_price >= float(trade_info['target_price']):
+                send_trade_update_notification(symbol, 'ALVO ATINGIDO (LUCRO)', trade_info)
+                trades_to_remove.append(symbol)
+            elif current_price <= float(trade_info['stop_loss']):
+                send_trade_update_notification(symbol, 'STOP ATINGIDO (PERDA)', trade_info)
+                trades_to_remove.append(symbol)
+        elif trade_info['signal_type'] == 'VENDA':
+            if current_price <= float(trade_info['target_price']):
+                send_trade_update_notification(symbol, 'ALVO ATINGIDO (LUCRO)', trade_info)
+                trades_to_remove.append(symbol)
+            elif current_price >= float(trade_info['stop_loss']):
+                send_trade_update_notification(symbol, 'STOP ATINGIDO (PERDA)', trade_info)
+                trades_to_remove.append(symbol)
 
-        # ... (lógica de verificação de alvo/stop continua a mesma)
-        if (trade_info['signal_type'] == 'COMPRA' and preco_atual >= alvo) or \
-           (trade_info['signal_type'] == 'VENDA' and preco_atual <= alvo):
-            print(f"✅ ALVO ATINGIDO para {symbol}!")
-            send_take_profit_notification(trade_info, preco_atual)
-            trades_fechados.append(symbol)
-        elif (trade_info['signal_type'] == 'COMPRA' and preco_atual <= stop) or \
-             (trade_info['signal_type'] == 'VENDA' and preco_atual >= stop):
-            print(f"❌ STOP ATINGIDO para {symbol}!")
-            send_stop_loss_notification(trade_info, preco_atual)
-            trades_fechados.append(symbol)
-            
-    for symbol in trades_fechados:
-        del trades_abertos[symbol]
+    for symbol in trades_to_remove:
+        del open_trades[symbol]
 
-    # --- FASE 2: Buscar Novos Sinais ---
-    print("\n🔎 Fase 2: Buscando por novos sinais...")
-    for symbol, df_raw in dados_brutos_mercado.items():
-        if symbol in trades_abertos:
-            print(f"⚪ {symbol} já tem um trade em andamento.")
+    # FASE 2: Buscar Novos Sinais
+    print("\n🔍 Fase 2: Buscando por novos sinais...")
+    symbols_to_scan = [s for s in SYMBOLS if s not in open_trades]
+    all_market_data = fetch_all_raw_data(symbols_to_scan)
+
+    for symbol, df_raw in all_market_data.items():
+        df_4h = df_raw.set_index('timestamp').resample('4H').agg({
+            'close': 'last', 'high': 'max', 'low': 'min', 'volume': 'sum'
+        }).dropna().reset_index()
+        
+        df_1h = df_raw.set_index('timestamp').resample('1H').agg({
+            'close': 'last', 'high': 'max', 'low': 'min', 'volume': 'sum'
+        }).dropna().reset_index()
+
+        if df_4h.empty or df_1h.empty:
             continue
 
-        # Define a tendência macro usando os dados brutos
-        tendencia_macro = get_macro_trend(df_raw) if USAR_MTA else "NEUTRA"
+        sma_20_4h = df_4h['close'].rolling(window=20).mean().iloc[-1]
+        sma_50_4h = df_4h['close'].rolling(window=50).mean().iloc[-1]
+        
+        tendencia_macro = "NEUTRA"
+        if sma_20_4h > sma_50_4h:
+            tendencia_macro = "ALTA"
+        elif sma_20_4h < sma_50_4h:
+            tendencia_macro = "BAIXA"
         print(f"🔮 Tendência MACRO para {symbol} é: {tendencia_macro}")
 
-        # Cria o dataframe de 1h para os indicadores
-        df_1h = df_raw.set_index('timestamp').resample('1h').last().ffill().dropna().reset_index()
-        
-        df_com_indicadores = calculate_indicators(df_1h)
-        
-        if df_com_indicadores is not None and not df_com_indicadores.empty:
-            novo_sinal = generate_signal(df_com_indicadores, symbol, tendencia_macro) # Passa a tendência como argumento
-            if novo_sinal:
-                print(f"📢 Novo sinal encontrado para {symbol}! Adicionando ao monitoramento.")
-                trades_abertos[symbol] = novo_sinal
-                send_signal_notification(novo_sinal)
+        df_with_indicators = calculate_indicators(df_1h.copy())
+        if df_with_indicators is None or df_with_indicators.empty:
+            continue
 
-    salvar_trades_abertos(trades_abertos)
+        # --- OTIMIZAÇÃO APLICADA AQUI ---
+        # 1. Verificamos a condição técnica preliminar (cruzamento de médias)
+        latest_indicators = df_with_indicators.iloc[-1]
+        sma_short = latest_indicators.get('SMA_20')
+        sma_long = latest_indicators.get('SMA_50')
+        
+        pre_condicao_compra = sma_short > sma_long
+        pre_condicao_venda = sma_short < sma_long
+
+        sentiment_score = 0.0
+        # 2. Se a pré-condição for atendida, SÓ ENTÃO buscamos as notícias.
+        if pre_condicao_compra or pre_condicao_venda:
+            print(f"📈 Pré-condição técnica encontrada para {symbol}. Buscando sentimento...")
+            sentiment_score = get_sentiment_score(symbol)
+        
+        # 3. Passamos o sentimento (seja o real ou 0.0) para o gerador de sinais.
+        signal = generate_signal(df_with_indicators, symbol, tendencia_macro, sentiment_score)
+        
+        if signal:
+            print(f"📢 Novo sinal encontrado para {symbol}!")
+            send_signal_notification(signal)
+            open_trades[symbol] = signal
+
+    save_open_trades(open_trades)
     print("\n💾 Estado atualizado salvo. Ciclo concluído.")
 
 if __name__ == "__main__":
-    main()
+    while True:
+        run_scanner()
+        print("\n--- Aguardando 15 minutos para o próximo ciclo ---")
+        time.sleep(900)
