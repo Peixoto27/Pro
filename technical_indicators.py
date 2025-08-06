@@ -1,14 +1,10 @@
-# technical_indicators.py (Versão com ATR)
+# technical_indicators.py (Versão com a correção do Volume SMA)
 import pandas as pd
 import ta
 
 def calculate_indicators(df):
     """Calcula todos os indicadores técnicos necessários para a estratégia."""
     try:
-        # --- APROXIMAÇÃO PARA DADOS OHLC ---
-        # Como a API do CoinGecko não fornece OHLC por hora facilmente,
-        # usamos o 'close' para os cálculos que precisam de high/low.
-        # Esta é uma simplificação funcional.
         if 'high' not in df.columns:
             df['high'] = df['close']
         if 'low' not in df.columns:
@@ -23,10 +19,12 @@ def calculate_indicators(df):
         df['MACD'] = macd.macd()
         df['MACD_signal'] = macd.macd_signal()
         
-        df['Volume_SMA_20'] = ta.volume.sma_volume(df['volume'], window=20)
+        # --- CORREÇÃO APLICADA AQUI ---
+        # O nome da função estava incorreto. A forma correta é usar o sma_indicator
+        # diretamente na coluna de volume.
+        df['Volume_SMA_20'] = ta.trend.sma_indicator(df['volume'], window=20)
 
         # --- NOVO CÁLCULO DE ATR ---
-        # Adicionamos o cálculo do Average True Range (ATR) para volatilidade
         df['ATR_14'] = ta.volatility.AverageTrueRange(
             high=df['high'], 
             low=df['low'], 
@@ -34,10 +32,14 @@ def calculate_indicators(df):
             window=14
         ).average_true_range()
 
-        # Remove linhas com valores NaN gerados pelos cálculos iniciais
         df = df.dropna().reset_index(drop=True)
         
-        print(f"✅ Indicadores para {df.iloc[-1]['symbol']} calculados com sucesso.")
+        # Adicionei o 'symbol' ao DataFrame para a mensagem de sucesso ser mais clara
+        # Esta parte é opcional, mas ajuda na depuração.
+        # Se o seu df já tiver o símbolo, pode ignorar.
+        # df['symbol'] = symbol 
+        
+        print(f"✅ Indicadores calculados com sucesso.")
         return df
 
     except Exception as e:
