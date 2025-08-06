@@ -1,4 +1,4 @@
-# scanner.py (Versão Final Polida)
+# scanner.py (Versão Final Simplificada)
 import pandas as pd
 import time
 from price_fetcher import fetch_all_raw_data
@@ -18,29 +18,19 @@ SYMBOLS = [
 def run_scanner():
     print("\n--- Iniciando novo ciclo de varredura ---")
     
-    # FASE 1: Monitorar Trades Existentes
-    print("\n📊 Fase 1: Monitorando trades existentes...")
     open_trades = load_open_trades()
     trades_to_remove = []
     
-    # --- CORREÇÃO 1: VERIFICA SE HÁ TRADES ABERTOS ANTES DE BUSCAR DADOS ---
+    # FASE 1: Monitorar Trades Existentes
+    print("\n📊 Fase 1: Monitorando trades existentes...")
     if open_trades:
         raw_data_trades = fetch_all_raw_data(list(open_trades.keys()))
-        
         for symbol, trade_info in open_trades.items():
             df_raw = raw_data_trades.get(symbol)
             if df_raw is None or df_raw.empty:
                 continue
             
-            # --- CORREÇÃO 2: USA 'h' MINÚSCULO PARA RESAMPLE ---
-            df_1h = df_raw.set_index('timestamp').resample('1h').agg({
-                'close': 'last', 'high': 'max', 'low': 'min', 'volume': 'sum'
-            }).dropna().reset_index()
-            
-            if df_1h.empty:
-                continue
-
-            current_price = df_1h.iloc[-1]['close']
+            current_price = df_raw['close'].iloc[-1]
             
             if trade_info['signal_type'] == 'COMPRA':
                 if current_price >= float(trade_info['target_price']):
@@ -66,14 +56,13 @@ def run_scanner():
     all_market_data = fetch_all_raw_data(symbols_to_scan)
 
     for symbol, df_raw in all_market_data.items():
-        # --- CORREÇÃO 2: USA 'h' MINÚSCULO PARA RESAMPLE ---
-        df_4h = df_raw.set_index('timestamp').resample('4h').agg({
-            'close': 'last', 'high': 'max', 'low': 'min', 'volume': 'sum'
-        }).dropna().reset_index()
+        df_4h = df_raw.set_index('timestamp').resample('4h').agg(
+            {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}
+        ).dropna()
         
-        df_1h = df_raw.set_index('timestamp').resample('1h').agg({
-            'close': 'last', 'high': 'max', 'low': 'min', 'volume': 'sum'
-        }).dropna().reset_index()
+        df_1h = df_raw.set_index('timestamp').resample('1h').agg(
+            {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}
+        ).dropna()
 
         if df_4h.empty or df_1h.empty:
             continue
