@@ -6,7 +6,7 @@ import time
 # Nosso "cache" em memória. Um dicionário para guardar os resultados.
 sentiment_cache = {}
 # Tempo de vida do cache em segundos (ex: 2 horas)
-CACHE_DURATION = 2 * 60 * 60 
+CACHE_DURATION = 6 * 60 * 60 
 
 def get_sentiment_score(symbol):
     """
