@@ -1,110 +1,113 @@
-# scanner.py (Versão Final Simplificada)
-import pandas as pd
+# scanner.py (Versão CORRETA e COMPLETA)
 import time
-from price_fetcher import fetch_all_raw_data
-from technical_indicators import calculate_indicators
+from price_fetcher import fetch_all_data
+from technical_indicators import calculate_indicators # Importa a função de volta
 from signal_generator import generate_signal
-from notifier import send_signal_notification, send_trade_update_notification
-from state_manager import load_open_trades, save_open_trades
+from state_manager import load_open_trades, save_open_trades, check_and_notify_closed_trades
+from notifier import send_signal_notification
 from sentiment_analyzer import get_sentiment_score
 
+# --- CONFIGURAÇÕES ---
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", 
-    "AVAXUSDT", "DOTUSDT", "LINKUSDT", "TONUSDT", "INJUSDT", "RNDRUSDT", 
-    "ARBUSDT", "LTCUSDT", "MATICUSDT", "OPUSDT", "NEARUSDT", "APTUSDT", 
-    "PEPEUSDT", "SEIUSDT"
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+    "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "TONUSDT",
+    "INJUSDT", "RNDRUSDT", "ARBUSDT", "LTCUSDT", "MATICUSDT",
+    "OPUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT", "SEIUSDT"
 ]
+USAR_SENTIMENTO = True # Chave para ligar/desligar a análise de sentimento
+
+def get_macro_trend(df, symbol):
+    """Analisa a tendência macro (4h) para uma moeda específica."""
+    try:
+        df_4h = df.set_index('timestamp').resample('4h').agg({
+            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+        }).dropna()
+        
+        if len(df_4h) < 50: return "NEUTRA"
+        
+        sma_50_4h = ta.trend.sma_indicator(df_4h['close'], window=50)
+        last_close = df_4h['close'].iloc[-1]
+        last_sma = sma_50_4h.iloc[-1]
+
+        if last_close > last_sma:
+            print(f"🔮 Tendência MACRO para {symbol} é: ALTA")
+            return "ALTA"
+        else:
+            print(f"🔮 Tendência MACRO para {symbol} é: BAIXA")
+            return "BAIXA"
+    except Exception as e:
+        print(f"⚠️ Erro ao calcular tendência macro para {symbol}: {e}")
+        return "NEUTRA"
 
 def run_scanner():
-    print("\n--- Iniciando novo ciclo de varredura ---")
+    """
+    Executa o ciclo principal do scanner.
+    """
+    print("\n--- Iniciando novo ciclo do scanner ---")
     
-    open_trades = load_open_trades()
-    trades_to_remove = []
-    
-    # FASE 1: Monitorar Trades Existentes
+    # Fase 1: Monitorar trades existentes
     print("\n📊 Fase 1: Monitorando trades existentes...")
-    if open_trades:
-        raw_data_trades = fetch_all_raw_data(list(open_trades.keys()))
-        for symbol, trade_info in open_trades.items():
-            df_raw = raw_data_trades.get(symbol)
-            if df_raw is None or df_raw.empty:
-                continue
-            
-            current_price = df_raw['close'].iloc[-1]
-            
-            if trade_info['signal_type'] == 'COMPRA':
-                if current_price >= float(trade_info['target_price']):
-                    send_trade_update_notification(symbol, 'ALVO ATINGIDO (LUCRO)', trade_info)
-                    trades_to_remove.append(symbol)
-                elif current_price <= float(trade_info['stop_loss']):
-                    send_trade_update_notification(symbol, 'STOP ATINGIDO (PERDA)', trade_info)
-                    trades_to_remove.append(symbol)
-            elif trade_info['signal_type'] == 'VENDA':
-                if current_price <= float(trade_info['target_price']):
-                    send_trade_update_notification(symbol, 'ALVO ATINGIDO (LUCRO)', trade_info)
-                    trades_to_remove.append(symbol)
-                elif current_price >= float(trade_info['stop_loss']):
-                    send_trade_update_notification(symbol, 'STOP ATINGIDO (PERDA)', trade_info)
-                    trades_to_remove.append(symbol)
+    open_trades = load_open_trades()
+    market_data_for_monitoring = fetch_all_data(list(open_trades.keys()))
+    check_and_notify_closed_trades(open_trades, market_data_for_monitoring)
 
-    for symbol in trades_to_remove:
-        del open_trades[symbol]
-
-    # FASE 2: Buscar Novos Sinais
+    # Fase 2: Buscar por novos sinais
     print("\n🔍 Fase 2: Buscando por novos sinais...")
-    symbols_to_scan = [s for s in SYMBOLS if s not in open_trades]
-    all_market_data = fetch_all_raw_data(symbols_to_scan)
+    all_symbols_to_fetch = list(set(SYMBOLS) - set(open_trades.keys()))
+    if not all_symbols_to_fetch:
+        print("⚪ Não há novas moedas para analisar, todos os trades estão abertos.")
+        return
 
-    for symbol, df_raw in all_market_data.items():
-        df_4h = df_raw.set_index('timestamp').resample('4h').agg(
-            {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}
-        ).dropna()
-        
-        df_1h = df_raw.set_index('timestamp').resample('1h').agg(
-            {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}
-        ).dropna()
+    print("🚚 Buscando dados brutos do mercado (OHLCV)...")
+    market_data = fetch_all_data(all_symbols_to_fetch)
 
-        if df_4h.empty or df_1h.empty:
+    for symbol, df in market_data.items():
+        if df is None or df.empty:
             continue
 
-        sma_20_4h = df_4h['close'].rolling(window=20).mean().iloc[-1]
-        sma_50_4h = df_4h['close'].rolling(window=50).mean().iloc[-1]
-        
-        tendencia_macro = "NEUTRA"
-        if sma_20_4h > sma_50_4h:
-            tendencia_macro = "ALTA"
-        elif sma_20_4h < sma_50_4h:
-            tendencia_macro = "BAIXA"
-        print(f"🔮 Tendência MACRO para {symbol} é: {tendencia_macro}")
+        print("-" * 20)
+        print(f"🔬 Analisando {symbol}...")
 
-        df_with_indicators = calculate_indicators(df_1h.copy())
-        if df_with_indicators is None or df_with_indicators.empty:
+        # --- FLUXO DE DADOS CORRETO ---
+        # 1. Calcula os indicadores
+        df_with_indicators = calculate_indicators(df)
+        if df_with_indicators.empty:
+            print(f"⚠️ Não foi possível calcular indicadores para {symbol}. Pulando...")
+            continue
+        print("✅ Indicadores calculados com sucesso.")
+
+        # 2. Pega a tendência macro
+        tendencia_macro = get_macro_trend(df, symbol)
+        if tendencia_macro != "ALTA":
+            print(f"⚪ Tendência macro não é de ALTA para {symbol}. Pulando...")
             continue
 
-        latest_indicators = df_with_indicators.iloc[-1]
-        sma_short = latest_indicators.get('SMA_20')
-        sma_long = latest_indicators.get('SMA_50')
-        
-        pre_condicao_compra = sma_short > sma_long
-        pre_condicao_venda = sma_short < sma_long
-
+        # 3. Pega o sentimento (se ativado)
         sentiment_score = 0.0
-        if pre_condicao_compra or pre_condicao_venda:
-            print(f"📈 Pré-condição técnica encontrada para {symbol}. Buscando sentimento...")
+        if USAR_SENTIMENTO:
+            print(f"✅ Pré-condição técnica encontrada para {symbol}. Buscando sentimento...")
             sentiment_score = get_sentiment_score(symbol)
+            if sentiment_score < 0:
+                print(f"⚪ Sentimento negativo ({sentiment_score:.2f}) para {symbol}. Pulando...")
+                continue
         
-        signal = generate_signal(market_df, symbol)
+        # 4. Gera o sinal, passando o DataFrame COM indicadores
+        signal = generate_signal(df_with_indicators, symbol) # Passa o DF correto!
         
         if signal:
-            print(f"📢 Novo sinal encontrado para {symbol}!")
+            print(f"🔥 SINAL ENCONTRADO PARA {symbol}!")
             send_signal_notification(signal)
             open_trades[symbol] = signal
+            save_open_trades(open_trades)
+        else:
+            print(f"⚪ Sem sinal para {symbol} após análise final.")
 
-    save_open_trades(open_trades)
-    print("\n💾 Estado atualizado salvo. Ciclo concluído.")
-
+# --- Loop Principal ---
 if __name__ == "__main__":
     while True:
-        run_scanner()
-        print("\n--- Aguardando 15 minutos para o próximo ciclo ---")
+        try:
+            run_scanner()
+        except Exception as e:
+            print(f"🚨 ERRO CRÍTICO NO LOOP PRINCIPAL: {e}")
+        print("\n--- Ciclo concluído. Aguardando 15 minutos... ---")
         time.sleep(900)
