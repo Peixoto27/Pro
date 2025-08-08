@@ -1,96 +1,69 @@
-# signal_generator.py (Versão Otimizada que recebe o sentimento)
+# signal_generator.py (Versão Final com Pontuação da IA)
 import pandas as pd
 import datetime
-# REMOVEMOS o import do sentiment_analyzer daqui
 
-# --- CHAVES DE ATIVAÇÃO ---
-USAR_MTA = True
-USAR_SENTIMENTO = True
-USAR_STOP_DINAMICO_ATR = True
+# --- PARÂMETROS DA ESTRATÉGIA COM PESOS DA IA ---
+PONTUACAO_MINIMA_PARA_SINAL = 85  # Aumentamos a exigência. Queremos sinais A+
 
-# A função agora aceita 'sentiment_score' como um argumento
-def generate_signal(df_with_indicators, symbol, tendencia_macro="NEUTRA", sentiment_score=0.0):
-    if df_with_indicators is None or len(df_with_indicators) < 2:
+# Pesos baseados na importância que a IA nos deu
+PESO_SMA = 35
+PESO_VOLUME = 30
+PESO_MACD = 25
+PESO_RSI = 10  # Ainda vale alguma coisa, mas menos
+
+def generate_signal(df, indicators):
+    """
+    Gera um sinal de compra usando um sistema de pontuação ponderado pela IA.
+    """
+    if df.empty or len(df) < 50:
         return None
 
-    # A lógica de buscar o sentimento foi removida daqui.
-    # Usamos diretamente o valor que foi passado para a função.
-
-    latest_data = df_with_indicators.iloc[-1]
-    # ... (o resto do arquivo continua exatamente o mesmo)
-    current_price = latest_data.get('close')
-    atr_value = latest_data.get('ATR_14')
-    sma_short = latest_data.get('SMA_20')
-    sma_long = latest_data.get('SMA_50')
-    rsi = latest_data.get('RSI')
-    macd_line = latest_data.get('MACD')
-    macd_signal_line = latest_data.get('MACD_signal')
-    current_volume = latest_data.get('volume')
-    volume_sma = latest_data.get('Volume_SMA_20')
-
-    if any(v is None for v in [current_price, atr_value, sma_short, sma_long, rsi, macd_line, macd_signal_line, current_volume, volume_sma]):
-        return None
-
-    signal_type = None
+    # Pega os dados mais recentes
+    latest = df.iloc[-1]
     
-    condicao_compra = (
-        sma_short > sma_long and
-        (tendencia_macro == "ALTA" or tendencia_macro == "NEUTRA") and
-        macd_line > macd_signal_line and
-        current_volume > volume_sma and
-        sentiment_score >= -0.05
-    )
+    # --- INICIA O CÁLCULO DA PONTUAÇÃO ---
+    confidence_score = 0
+    
+    # 1. Condição da SMA 50 (O mais importante - vale até 35 pontos)
+    # O preço precisa estar acima da média de 50 períodos
+    if latest['close'] > latest['sma_50']:
+        confidence_score += PESO_SMA
+        
+    # 2. Condição do Volume (O segundo mais importante - vale até 30 pontos)
+    # O volume atual precisa ser maior que a média de volume
+    if latest['volume'] > latest['volume_sma_20']:
+        confidence_score += PESO_VOLUME
+        
+    # 3. Condição do MACD (O terceiro mais importante - vale até 25 pontos)
+    # A linha do MACD precisa estar acima da linha de sinal (cruzamento de alta)
+    if latest['macd_diff'] > 0:
+        confidence_score += PESO_MACD
+        
+    # 4. Condição do RSI (Menos importante, mas ajuda - vale até 10 pontos)
+    # RSI não pode estar sobrecomprado (menor que 70)
+    if latest['rsi'] < 70:
+        confidence_score += PESO_RSI
 
-    condicao_venda = (
-        sma_short < sma_long and
-        (tendencia_macro == "BAIXA" or tendencia_macro == "NEUTRA") and
-        macd_line < macd_signal_line and
-        sentiment_score <= 0.1
-    )
+    # --- DECISÃO FINAL ---
+    # Verifica se a pontuação total atingiu nosso mínimo de alta confiança
+    if confidence_score >= PONTUACAO_MINIMA_PARA_SINAL:
+        # Se sim, calcula os alvos usando a volatilidade (ATR)
+        entry_price = latest['close']
+        stop_loss = entry_price - (2 * latest['atr'])  # Stop dinâmico com ATR
+        target_price = entry_price + (4 * latest['atr']) # Alvo com R:R de 1:2
+        
+        # Monta o dicionário completo do sinal
+        signal_dict = {
+            'signal_type': 'BUY',
+            'symbol': indicators['symbol'],
+            'entry_price': f"{entry_price:.4f}",
+            'target_price': f"{target_price:.4f}",
+            'stop_loss': f"{stop_loss:.4f}",
+            'risk_reward': "1:2.0",
+            'confidence_score': f"{confidence_score}",
+            'strategy': f"IA-Weighted (ATR Stop)",
+            'created_at': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        return signal_dict
 
-    if condicao_compra:
-        signal_type = "COMPRA"
-    elif condicao_venda:
-        signal_type = "VENDA"
-
-    if signal_type:
-        risk_reward_ratio = 2.0
-        if USAR_STOP_DINAMICO_ATR and atr_value > 0:
-            multiplicador_atr_stop = 2.0
-            if signal_type == "COMPRA":
-                stop_loss = current_price - (atr_value * multiplicador_atr_stop)
-                target_price = current_price + (current_price - stop_loss) * risk_reward_ratio
-            else:
-                stop_loss = current_price + (atr_value * multiplicador_atr_stop)
-                target_price = current_price - (stop_loss - current_price) * risk_reward_ratio
-            strategy_name = "Confluência Total + ATR Stop"
-        else:
-            if signal_type == "COMPRA":
-                stop_loss = current_price * 0.98
-                target_price = current_price + (current_price - stop_loss) * risk_reward_ratio
-            else:
-                stop_loss = current_price * 1.02
-                target_price = current_price - (stop_loss - current_price) * risk_reward_ratio
-            strategy_name = "Confluência Total (Stop Fixo)"
-
-        confianca_rsi = (70 - rsi) if signal_type == "COMPRA" else (rsi - 30)
-        confianca_macd = abs(macd_line - macd_signal_line) * 10
-        score_rsi = min(max(confianca_rsi * 2.5, 0), 100)
-        score_macd = min(max(confianca_macd, 0), 100)
-        score_sentimento = (sentiment_score + 1) * 50
-        confidence_score = (score_rsi + score_macd + score_sentimento) / 3
-
-        if confidence_score > 65:
-            expected_profit_percent = abs((target_price - current_price) / current_price) * 100
-            signal_dict = {
-                "symbol": symbol, "signal_type": signal_type, "entry_price": f"{current_price:.4f}",
-                "target_price": f"{target_price:.4f}", "stop_loss": f"{stop_loss:.4f}",
-                "risk_reward": f"1:{risk_reward_ratio}", "confidence_score": f"{confidence_score:.1f}",
-                "expected_profit_percent": f"{expected_profit_percent:.2f}",
-                "expected_profit_usdt": f"{(expected_profit_percent/100 * 1000):.2f} (em lote de 1000 USDT)",
-                "news_summary": f"Sentimento: {sentiment_score:.2f} | ATR: {atr_value:.4f}",
-                "strategy": strategy_name, "timeframe": "1 Hora",
-                "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            return signal_dict
     return None
