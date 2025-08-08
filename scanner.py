@@ -93,7 +93,7 @@ def run_scanner():
             print(f"📈 Pré-condição técnica encontrada para {symbol}. Buscando sentimento...")
             sentiment_score = get_sentiment_score(symbol)
         
-        signal = generate_signal(df_with_indicators, symbol, tendencia_macro, sentiment_score)
+        signal = generate_signal(df, symbol)
         
         if signal:
             print(f"📢 Novo sinal encontrado para {symbol}!")
