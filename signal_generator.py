@@ -1,4 +1,4 @@
-# signal_generator.py (Versão Final com Pontuação da IA)
+# signal_generator.py (Versão Final com Pontuação da IA - CORRIGIDO)
 import pandas as pd
 import datetime
 
@@ -11,7 +11,8 @@ PESO_VOLUME = 30
 PESO_MACD = 25
 PESO_RSI = 10  # Ainda vale alguma coisa, mas menos
 
-def generate_signal(df, indicators):
+# A função agora aceita os 4 argumentos corretamente
+def generate_signal(df, symbol, tendencia_macro, sentiment_score):
     """
     Gera um sinal de compra usando um sistema de pontuação ponderado pela IA.
     """
@@ -55,7 +56,7 @@ def generate_signal(df, indicators):
         # Monta o dicionário completo do sinal
         signal_dict = {
             'signal_type': 'BUY',
-            'symbol': indicators['symbol'],
+            'symbol': symbol, # Corrigido para usar o 'symbol' recebido diretamente
             'entry_price': f"{entry_price:.4f}",
             'target_price': f"{target_price:.4f}",
             'stop_loss': f"{stop_loss:.4f}",
