@@ -3,3 +3,4 @@ pandas
 requests
 ta
 textblob
+scikit-learn
