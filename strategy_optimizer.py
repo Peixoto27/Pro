@@ -14,7 +14,7 @@ def prepare_data(filename):
     df['sma_50'] = ta.trend.sma_indicator(df['close'], window=50)
     df['rsi'] = ta.momentum.rsi(df['close'], window=14)
     df['macd_diff'] = ta.trend.macd_diff(df['close'], window_slow=26, window_fast=12, window_sign=9)
-    df['volume_sma_20'] = ta.volume.sma_indicator(df['volume'], window=20)
+    df['volume_sma_20'] = ta.trend.sma_indicator(df['volume'], window=20)
     
     # --- A MÁGICA DO MACHINE LEARNING: DEFININDO O ALVO ---
     # Nosso objetivo é prever se o preço vai subir nos próximos X períodos.
