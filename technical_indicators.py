@@ -1,47 +1,29 @@
-# technical_indicators.py (Versão com a correção do Volume SMA)
+# technical_indicators.py (Versão CORRETA e COMPLETA)
 import pandas as pd
 import ta
 
 def calculate_indicators(df):
-    """Calcula todos os indicadores técnicos necessários para a estratégia."""
+    """
+    Calcula todos os indicadores técnicos necessários e retorna um novo DataFrame.
+    """
+    if df.empty or len(df) < 50:
+        print("⚠️ DataFrame insuficiente para calcular todos os indicadores.")
+        return pd.DataFrame() # Retorna um DataFrame vazio se não houver dados suficientes
+
     try:
-        if 'high' not in df.columns:
-            df['high'] = df['close']
-        if 'low' not in df.columns:
-            df['low'] = df['close']
+        # Faz uma cópia para evitar avisos de SettingWithCopyWarning
+        df_indicators = df.copy()
 
-        # --- CÁLCULOS EXISTENTES ---
-        df['SMA_20'] = ta.trend.sma_indicator(df['close'], window=20)
-        df['SMA_50'] = ta.trend.sma_indicator(df['close'], window=50)
-        df['RSI'] = ta.momentum.rsi(df['close'], window=14)
+        # Calcula todos os indicadores que nossa estratégia precisa
+        df_indicators['sma_50'] = ta.trend.sma_indicator(df_indicators['close'], window=50)
+        df_indicators['rsi'] = ta.momentum.rsi(df_indicators['close'], window=14)
+        df_indicators['macd_diff'] = ta.trend.macd_diff(df_indicators['close'], window_slow=26, window_fast=12, window_sign=9)
+        df_indicators['volume_sma_20'] = ta.trend.sma_indicator(df_indicators['volume'], window=20)
+        df_indicators['atr'] = ta.volatility.average_true_range(df_indicators['high'], df_indicators['low'], df_indicators['close'], window=14)
         
-        macd = ta.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9)
-        df['MACD'] = macd.macd()
-        df['MACD_signal'] = macd.macd_signal()
-        
-        # --- CORREÇÃO APLICADA AQUI ---
-        # O nome da função estava incorreto. A forma correta é usar o sma_indicator
-        # diretamente na coluna de volume.
-        df['Volume_SMA_20'] = ta.trend.sma_indicator(df['volume'], window=20)
-
-        # --- NOVO CÁLCULO DE ATR ---
-        df['ATR_14'] = ta.volatility.AverageTrueRange(
-            high=df['high'], 
-            low=df['low'], 
-            close=df['close'], 
-            window=14
-        ).average_true_range()
-
-        df = df.dropna().reset_index(drop=True)
-        
-        # Adicionei o 'symbol' ao DataFrame para a mensagem de sucesso ser mais clara
-        # Esta parte é opcional, mas ajuda na depuração.
-        # Se o seu df já tiver o símbolo, pode ignorar.
-        # df['symbol'] = symbol 
-        
-        print(f"✅ Indicadores calculados com sucesso.")
-        return df
+        # Remove linhas com valores NaN que são criados no início do cálculo dos indicadores
+        return df_indicators.dropna()
 
     except Exception as e:
-        print(f"⚠️ Não foi possível calcular indicadores: {e}")
-        return None
+        print(f"❌ Erro ao calcular indicadores: {e}")
+        return pd.DataFrame()
