@@ -2,7 +2,7 @@ import pandas as pd
 import datetime
 import uuid # Importar a biblioteca uuid
 
-PONTUACAO_MINIMA_PARA_SINAL = 90 # Aumentar a pontuação mínima para sinais
+PONTUACAO_MINIMA_PARA_SINAL = 80 # Aumentar a pontuação mínima para sinais
 
 PESO_SMA = 35
 PESO_VOLUME = 30
