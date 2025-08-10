@@ -1,4 +1,7 @@
+# -*- coding: utf-8 -*-
 import os
+from dotenv import load_dotenv
+load_dotenv()  # agora lê o arquivo .env
 
 def getenv_float(key, default):
     try:
