@@ -4,3 +4,4 @@ requests
 ta
 textblob
 scikit-learn
+xgboost
