@@ -1,4 +1,6 @@
-import os, json, joblib
+import os
+import json
+import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -6,147 +8,129 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_fscore_support
 from sklearn.ensemble import RandomForestClassifier
 
-# tenta usar XGBoost; se não tiver, cai para RandomForest
 try:
     from xgboost import XGBClassifier
     USE_XGB = True
 except Exception:
     USE_XGB = False
 
-DATA_FILE = os.getenv("AI_TRAIN_DATA_FILE", "ai_training_data.json")
-MODEL_FILE = os.getenv("AI_MODEL_FILE", "ai_model.pkl")
-MIN_SAMPLES_TO_TRAIN = int(os.getenv("AI_MIN_SAMPLES", "200"))     # mínimo p/ primeiro treino
-RETRAIN_DELTA = int(os.getenv("AI_RETRAIN_DELTA", "50"))           # só retreina se houver +N amostras novas
+DATA_FILE = "ai_training_data.json"
+MODEL_FILE = "ai_model.pkl"
+META_FILE = MODEL_FILE + ".meta.json"
 
-BASE_FEATURES = [
-    "rsi","macd_diff","sma_ratio","volume_ratio",
-    "volatility","momentum","sentiment_score",
-    "hour_of_day","day_of_week","confidence_score"
+MIN_SAMPLES_TO_TRAIN = 200
+RETRAIN_DELTA = 50
+
+NUMERIC_FEATURES = [
+    "rsi", "macd_diff", "sma_ratio", "volume_ratio",
+    "volatility", "momentum", "sentiment_score",
+    "hour_of_day", "day_of_week", "confidence_score",
 ]
+CATEGORICAL_FEATURES = ["symbol"]
 
-def load_training_df() -> pd.DataFrame:
+def ensure_data_file():
     if not os.path.exists(DATA_FILE):
-        raise FileNotFoundError(f"{DATA_FILE} não encontrado.")
+        with open(DATA_FILE, "w") as f:
+            json.dump([], f)
+        print("[AI] Arquivo de dados inicializado vazio. Aguardando coleta de sinais.")
+        return False
+    return True
+
+def load_training_df():
+    if not ensure_data_file():
+        return pd.DataFrame()
     with open(DATA_FILE, "r") as f:
         raw = json.load(f)
     if not raw:
-        raise ValueError("Arquivo de dados está vazio.")
-
+        return pd.DataFrame()
     df = pd.DataFrame(raw)
-
-    # cria 'target' se necessário
-    if "result" in df.columns and "target" not in df.columns:
+    if "target" not in df.columns and "result" in df.columns:
         df["target"] = (df["result"] == "success").astype(int)
-
-    keep_cols = ["symbol","created_at"] + BASE_FEATURES + ["target"]
-    for c in keep_cols:
+    for c in NUMERIC_FEATURES:
         if c not in df.columns:
-            # cria coluna ausente com 0
-            df[c] = 0
+            df[c] = 0.0
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    if "created_at" in df.columns:
+        df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+    else:
+        df["created_at"] = pd.Timestamp.utcnow()
+    return df.dropna(subset=["target"])
 
-    df = df[keep_cols].copy()
-    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
-    df = df.dropna(subset=["created_at"])
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
-
-    # ordena por tempo (anti-leak)
-    df = df.sort_values("created_at")
-    return df
-
-def build_pipeline(symbols_fit: np.ndarray) -> Pipeline:
-    numeric = BASE_FEATURES
-    categorical = ["symbol"]
-
+def build_pipeline():
     pre = ColumnTransformer(
         transformers=[
-            ("num", StandardScaler(), numeric),
-            ("cat", OneHotEncoder(handle_unknown="ignore",
-                                  categories=[sorted(np.unique(symbols_fit))]), categorical),
-        ],
-        remainder="drop"
+            ("num", StandardScaler(), NUMERIC_FEATURES),
+            ("cat", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL_FEATURES),
+        ]
     )
-
     if USE_XGB:
         model = XGBClassifier(
-            n_estimators=400,
+            n_estimators=500,
             max_depth=6,
             learning_rate=0.05,
             subsample=0.9,
             colsample_bytree=0.9,
             reg_lambda=1.0,
-            eval_metric="logloss",
             tree_method="hist",
-            random_state=42
+            eval_metric="logloss",
+            random_state=42,
         )
     else:
         model = RandomForestClassifier(
-            n_estimators=600,
+            n_estimators=700,
             max_depth=None,
             min_samples_leaf=2,
             class_weight="balanced",
             n_jobs=-1,
-            random_state=42
+            random_state=42,
         )
-
     return Pipeline(steps=[("pre", pre), ("clf", model)])
 
-def should_retrain(current_count: int) -> bool:
-    meta_path = MODEL_FILE + ".meta.json"
-    if not os.path.exists(MODEL_FILE):   # nunca treinou
+def should_retrain(current_count):
+    if not os.path.exists(META_FILE):
         return current_count >= MIN_SAMPLES_TO_TRAIN
-    last = 0
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path,"r") as f:
-                last = int(json.load(f).get("trained_on_samples", 0))
-        except Exception:
-            pass
-    return (current_count - last) >= RETRAIN_DELTA
-
-def save_meta(samples: int, acc: float, auc: float, ver: str):
-    meta_path = MODEL_FILE + ".meta.json"
-    with open(meta_path,"w") as f:
-        json.dump({
-            "trained_on_samples": int(samples),
-            "version": ver,
-            "acc": float(acc),
-            "auc": float(auc)
-        }, f, indent=2)
+    try:
+        with open(META_FILE, "r") as f:
+            meta = json.load(f)
+        last = int(meta.get("trained_on_samples", 0))
+        return (current_count - last) >= RETRAIN_DELTA
+    except:
+        return True
 
 def main():
     df = load_training_df()
-    total = len(df)
-    if not should_retrain(total):
-        print(f"[AI] Sem retreinamento: amostras={total}. Aguardando novos dados.")
+    if df.empty:
+        print("[AI] Sem dados suficientes para treinar.")
         return
-
-    X = df.drop(columns=["target","created_at"])
-    y = df["target"].values
-
-    # split temporal simples 80/20 (já está ordenado por data)
-    split_idx = int(len(df)*0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-
-    pipe = build_pipeline(symbols_fit=X_train["symbol"].values)
+    if not should_retrain(len(df)):
+        print("[AI] Modelo ainda válido. Nenhum retreinamento necessário.")
+        return
+    df = df.sort_values("created_at")
+    split_idx = int(len(df) * 0.8)
+    train_df, test_df = df.iloc[:split_idx], df.iloc[split_idx:]
+    X_train, y_train = train_df[CATEGORICAL_FEATURES + NUMERIC_FEATURES], train_df["target"]
+    X_test, y_test = test_df[CATEGORICAL_FEATURES + NUMERIC_FEATURES], test_df["target"]
+    pipe = build_pipeline()
     pipe.fit(X_train, y_train)
-
-    # métricas
-    proba = pipe.predict_proba(X_test)[:,1] if len(X_test) else np.array([])
-    pred  = (proba >= 0.5).astype(int) if len(proba) else np.array([])
-    acc = accuracy_score(y_test, pred) if len(pred) else float("nan")
-    auc = roc_auc_score(y_test, proba) if len(np.unique(y_test))>1 and len(proba) else float("nan")
-
-    # salva
+    y_proba = pipe.predict_proba(X_test)[:, 1]
+    y_pred = (y_proba >= 0.5).astype(int)
+    acc = accuracy_score(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_proba) if len(set(y_test)) > 1 else float("nan")
+    pr, rc, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="binary", zero_division=0)
     joblib.dump(pipe, MODEL_FILE)
-    ver = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    joblib.dump(pipe, f"ai_model_v{ver}.pkl")
-    save_meta(total, acc, auc, ver)
-
-    print(f"[AI] Treino concluído | samples={total} | ACC={acc:.4f} | AUC={auc:.4f} | ver={ver}")
+    version = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    meta = {
+        "trained_on_samples": len(df),
+        "version": version,
+        "metrics": {"acc": acc, "auc": auc, "precision": pr, "recall": rc, "f1": f1},
+        "timestamp_utc": datetime.utcnow().isoformat(),
+    }
+    with open(META_FILE, "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"[AI] Treino concluído | Samples={len(df)} | ACC={acc:.4f} | AUC={auc:.4f} | F1={f1:.4f}")
 
 if __name__ == "__main__":
     main()
