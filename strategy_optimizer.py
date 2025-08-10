@@ -1,79 +1,86 @@
-# strategy_optimizer.py
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
-import ta
+# -*- coding: utf-8 -*-
+import time
+from statistics import fmean
+from indicators import rsi, macd, ema, bollinger
+from config import MIN_CONFIDENCE
 
-def prepare_data(filename):
-    """Lê o CSV e calcula os indicadores e o 'alvo' para o treinamento."""
-    print("Preparando dados para treinamento...")
-    df = pd.read_csv(filename, parse_dates=['timestamp'])
-    
-    # Calcula todos os indicadores que usamos na nossa estratégia
-    df['sma_50'] = ta.trend.sma_indicator(df['close'], window=50)
-    df['rsi'] = ta.momentum.rsi(df['close'], window=14)
-    df['macd_diff'] = ta.trend.macd_diff(df['close'], window_slow=26, window_fast=12, window_sign=9)
-    df['volume_sma_20'] = ta.trend.sma_indicator(df['volume'], window=20)
-    
-    # --- A MÁGICA DO MACHINE LEARNING: DEFININDO O ALVO ---
-    # Nosso objetivo é prever se o preço vai subir nos próximos X períodos.
-    # Vamos definir um "alvo": o preço subiu 5% nas próximas 24 horas? (1 = Sim, 0 = Não)
-    future_periods = 24
-    price_increase_threshold = 1.05 # 5% de aumento
-    
-    # Calcula o preço futuro
-    df['future_price'] = df['close'].shift(-future_periods)
-    
-    # Cria a nossa variável alvo (target)
-    df['target'] = (df['future_price'] / df['close']) > price_increase_threshold
-    df['target'] = df['target'].astype(int)
-    
-    # Remove linhas com dados NaN (gerados pelos indicadores e pelo shift)
-    df.dropna(inplace=True)
-    
-    print("Dados preparados com sucesso.")
-    return df
+def score_signal(closes):
+    # precisa de histórico mínimo para EMAs/BB e cruzamentos
+    if closes is None or len(closes) < 60:
+        return None
 
-def train_model(df):
-    """Treina um modelo de IA para encontrar a importância de cada indicador."""
-    print("Iniciando o treinamento do modelo de IA...")
-    
-    # Define quais colunas são os "recursos" (features) que o modelo usará para aprender
-    features = ['sma_50', 'rsi', 'macd_diff', 'volume_sma_20', 'open', 'high', 'low', 'close', 'volume']
-    # Define qual coluna é o "alvo" (target) que queremos prever
-    target = 'target'
-    
-    X = df[features]
-    y = df[target]
-    
-    # Divide os dados em um conjunto de treino e um conjunto de teste
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    # Usa um dos modelos mais eficazes para este tipo de problema: RandomForest
-    model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
-    
-    # Treina o modelo com os dados de treino
-    model.fit(X_train, y_train)
-    
-    # Avalia o modelo com os dados de teste (que ele nunca viu antes)
-    predictions = model.predict(X_test)
-    accuracy = accuracy_score(y_test, predictions)
-    print(f"🎯 Acurácia do modelo nos dados de teste: {accuracy * 100:.2f}%")
-    
-    # --- A RESPOSTA QUE QUEREMOS: A IMPORTÂNCIA DE CADA FATOR ---
-    print("\n--- Importância de cada indicador (segundo a IA) ---")
-    feature_importances = pd.Series(model.feature_importances_, index=features).sort_values(ascending=False)
-    print(feature_importances)
-    
-    print("\nTreinamento concluído.")
-    return model, feature_importances
+    r = rsi(closes, 14)
+    macd_line, signal_line, hist = macd(closes, 12, 26, 9)
+    ema20 = ema(closes, 20)
+    ema50 = ema(closes, 50)
+    bb_up, bb_mid, bb_low = bollinger(closes, 20, 2.0)
 
-# --- Para executar este script ---
-if __name__ == "__main__":
-    # Nome do arquivo gerado pelo data_collector.py
-    data_file = "historical_data_BTC_USDT_1h.csv"
-    
-    prepared_df = prepare_data(data_file)
-    trained_model, importances = train_model(prepared_df)
+    i = len(closes) - 1
+    # guarda pra cruzamento não estourar índice
+    if i < 1 or r[i] is None or ema20[i] is None or ema50[i] is None or bb_low[i] is None:
+        return None
 
+    c = closes[i]
+
+    is_rsi_bull   = 45 <= r[i] <= 65
+    is_macd_cross = (macd_line[i] > signal_line[i] and macd_line[i-1] <= signal_line[i-1])
+    is_trend_up   = ema20[i] > ema50[i]
+    near_bb_low   = c <= bb_low[i] * 1.01
+
+    s_rsi   = 1.0 if is_rsi_bull else (0.6 if 40 <= r[i] <= 70 else 0.0)
+    s_macd  = 1.0 if is_macd_cross else (0.7 if hist[i] > 0 else 0.2)
+    s_trend = 1.0 if is_trend_up else 0.3
+    s_bb    = 1.0 if near_bb_low else 0.5
+
+    score = fmean([s_rsi, s_macd, s_trend, s_bb])
+
+    # normalização leve por volatilidade recente
+    recent = [abs(h) for h in hist[-20:] if h is not None]
+    if recent and hist[i] is not None:
+        vol_boost = min(max(abs(hist[i]) / (max(recent) + 1e-9), 0.0), 1.0)
+        score = 0.85 * score + 0.15 * vol_boost
+
+    return max(0.0, min(1.0, score))
+
+def build_trade_plan(closes, risk_ratio_tp=2.0, risk_ratio_sl=1.0):
+    if closes is None or len(closes) < 30:
+        return None
+    diffs = [abs(closes[j] - closes[j-1]) for j in range(-15, 0)]
+    if not diffs:
+        return None
+    import statistics
+    last = float(closes[-1])
+    atr_like = float(statistics.fmean(diffs))
+    sl = last - (atr_like * risk_ratio_sl)
+    tp = last + (atr_like * risk_ratio_tp)
+    return {"entry": last, "tp": tp, "sl": sl, "rr": (tp - last) / (last - sl) if (last - sl) != 0 else None}
+
+def generate_signal(symbol, candles):
+    if not candles:
+        return None
+    closes = [c["close"] for c in candles if "close" in c]
+    score = score_signal(closes)
+    if score is None:
+        return None
+
+    plan = build_trade_plan(closes)
+    if plan is None:
+        return None
+
+    sig = {
+        "symbol": symbol,
+        "timestamp": int(time.time()),
+        "confidence": round(score, 4),
+        "entry": float(plan["entry"]),
+        "tp": float(plan["tp"]),
+        "sl": float(plan["sl"]),
+        "strategy": "RSI+MACD+EMA+BB",
+        "source": "coingecko"
+    }
+    # opcional para seu notifier (se não usar, ele ignora)
+    if plan.get("rr") is not None:
+        sig["risk_reward"] = round(plan["rr"], 2)
+
+    if sig["confidence"] < MIN_CONFIDENCE:
+        return None
+    return sig
