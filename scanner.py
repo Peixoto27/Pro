@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
-import time
-from coingecko_client import get_price_change, get_ohlc
+from coingecko_client import get_prices_change_bulk, get_ohlc
 from config import API_DELAY_SEC
 
 SYMBOLS = [
@@ -9,25 +8,23 @@ SYMBOLS = [
     "SOLUSDT","DOGEUSDT","MATICUSDT","DOTUSDT","LTCUSDT"
 ]
 
-def collect_symbol(symbol):
-    price = get_price_change(symbol)
-    ohlc  = get_ohlc(symbol, days=1, vs_currency="usd")
-    return {"symbol": symbol, "price": price, "ohlc": ohlc}
-
 def main():
+    print("🧩 Coletando PREÇOS em lote (bulk)…")
+    prices = get_prices_change_bulk(SYMBOLS)  # 1..N chamadas (lotes)
+
     all_data = []
     for s in SYMBOLS:
-        print(f"📊 Coletando {s}...")
+        print(f"📊 Coletando OHLC {s}…")
         try:
-            d = collect_symbol(s)
-            if d["price"] and d["ohlc"]:
-                all_data.append(d)
-                print(f"✅ {s} OK | candles={len(d['ohlc'])}")
+            ohlc = get_ohlc(s, days=1, vs_currency="usd")
+            price = prices.get(s)
+            if price and ohlc:
+                all_data.append({"symbol": s, "price": price, "ohlc": ohlc})
+                print(f"✅ {s} OK | candles={len(ohlc)}")
             else:
                 print(f"❌ Dados insuficientes para {s}")
         except Exception as e:
             print(f"⚠️ Erro {s}: {e}")
-        time.sleep(API_DELAY_SEC)
 
     with open("data_raw.json","w") as f:
         json.dump(all_data, f, indent=2)
