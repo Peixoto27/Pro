@@ -1,62 +1,65 @@
 # -*- coding: utf-8 -*-
-import requests
-import time
-
-# 🔹 DADOS DO SEU BOT / CANAL
-BOT_TOKEN = "7360602779:AAFIpncv7fkXaEX5PdWdEAUBb7NQ9SeA-F0"
-CHAT_ID = "-1002897426078"  # ID numérico do canal @botsinaistop
+import requests, time
+from config import TELEGRAM_BOT_TOKEN as BOT_TOKEN, TELEGRAM_CHAT_ID as CHAT_ID
 
 def escape_markdown_v2(text):
-    """Escapa caracteres especiais para MarkdownV2"""
     text = str(text)
-    escape_chars = [
-        "\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#",
-        "+", "-", "=", "|", "{", "}", ".", "!"
-    ]
-    for char in escape_chars:
-        text = text.replace(char, "\\" + char)
+    escape = ["\\","_","*","[","]","(",")","~","`",">","#","+","-","=","|","{","}","!","."]
+    for ch in escape:
+        text = text.replace(ch, "\\"+ch)
     return text
 
-def send_signal_notification(content, max_retries=3, retry_delay=2):
-    """
-    Envia sinal ou mensagem simples para o canal do Telegram.
-    """
-    try:
-        if isinstance(content, dict):  # É um sinal estruturado
-            text = (
-                f"📢 Novo sinal detectado para *{escape_markdown_v2(content['symbol'])}*\n"
-                f"🎯 Entrada: `{escape_markdown_v2(content['entry_price'])}` | "
-                f"Alvo: `{escape_markdown_v2(content['target_price'])}` | "
-                f"Stop: `{escape_markdown_v2(content['stop_loss'])}`\n"
-                f"📊 R:R: `{escape_markdown_v2(content['risk_reward'])}` | "
-                f"Confiança: `{escape_markdown_v2(content['confidence_score'])}`%\n"
-                f"⏱️ Estratégia: `{escape_markdown_v2(content['strategy'])}`\n"
-                f"📅 Criado em: `{escape_markdown_v2(content['created_at'])}`\n"
-                f"🆔 ID do Sinal: `{escape_markdown_v2(content['id'])}`"
-            )
-        else:  # Mensagem simples
-            text = escape_markdown_v2(str(content))
-
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "MarkdownV2"}
-
-        for attempt in range(max_retries):
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code == 200 and response.json().get("ok"):
-                print("✅ Notificação enviada com sucesso!")
+def _post(url, payload, max_retries=3, retry_delay=2):
+    for attempt in range(max_retries):
+        try:
+            r = requests.post(url, json=payload, timeout=12)
+            if r.status_code == 200 and r.json().get("ok"):
                 return True
-            elif response.status_code == 429:  # Rate limit
-                retry_after = response.json().get("parameters", {}).get("retry_after", retry_delay)
-                print(f"⚠️ Rate limit, aguardando {retry_after}s...")
-                time.sleep(retry_after)
+            if r.status_code == 429:
+                ra = r.json().get("parameters", {}).get("retry_after", retry_delay)
+                time.sleep(float(ra))
             else:
-                print(f"❌ Erro HTTP {response.status_code}: {response.text}")
-            time.sleep(retry_delay)
-        return False
-    except Exception as e:
-        print(f"❌ Erro crítico: {e}")
+                time.sleep(retry_delay); retry_delay *= 2
+        except requests.RequestException:
+            time.sleep(retry_delay); retry_delay *= 2
+    return False
+
+def send_signal_notification(content, max_retries=3, retry_delay=2):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("[TG] BOT_TOKEN/CHAT_ID ausentes.")
         return False
 
-# 🔹 TESTE RÁPIDO
-if __name__ == "__main__":
-    send_signal_notification("🚀 Teste de envio — Bot conectado ao canal!")
+    if isinstance(content, dict):
+        symbol = content.get("symbol","N/A")
+        entry  = content.get("entry_price", content.get("entry"))
+        tp     = content.get("target_price", content.get("tp"))
+        sl     = content.get("stop_loss", content.get("sl"))
+        rr     = content.get("risk_reward")
+        conf   = content.get("confidence_score", content.get("confidence"))
+        if isinstance(conf, float) and conf <= 1: conf = round(conf*100,2)
+        strategy = content.get("strategy","RSI+MACD+EMA+BB")
+        created  = content.get("created_at", content.get("timestamp"))
+        sig_id   = content.get("id","")
+
+        lines = [
+            f"📢 Novo sinal para *{escape_markdown_v2(symbol)}*",
+            f"🎯 Entrada: `{escape_markdown_v2(entry)}` | Alvo: `{escape_markdown_v2(tp)}` | Stop: `{escape_markdown_v2(sl)}`",
+        ]
+        if rr is not None:
+            lines.append(f"📊 R:R: `{escape_markdown_v2(rr)}`")
+        if conf is not None:
+            lines.append(f"📈 Confiança: `{escape_markdown_v2(conf)}`%")
+        lines.append(f"🧠 Estratégia: `{escape_markdown_v2(strategy)}`")
+        if created is not None:
+            lines.append(f"📅 Criado em: `{escape_markdown_v2(created)}`")
+        if sig_id:
+            lines.append(f"🆔 ID: `{escape_markdown_v2(sig_id)}`")
+        text = "\n".join(lines)
+    else:
+        text = escape_markdown_v2(str(content))
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "MarkdownV2"}
+    ok = _post(url, payload, max_retries=max_retries, retry_delay=retry_delay)
+    print("✅ Enviado ao Telegram." if ok else "❌ Falha no envio.")
+    return ok
