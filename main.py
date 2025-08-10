@@ -7,12 +7,12 @@ from coingecko_client import fetch_bulk_prices, fetch_ohlc
 from apply_strategies import generate_signal, score_signal
 from publisher import publish_many
 
-# ===== CONFIG =====
+# ===== CONFIG via .env =====
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.75"))
-TOP_SYMBOLS = int(os.getenv("TOP_SYMBOLS", "20"))  # Usando todas as 20 moedas
-DEBUG_SCORE = os.getenv("DEBUG_SCORE", "false").lower() == "true"
+TOP_SYMBOLS    = int(os.getenv("TOP_SYMBOLS", "20"))   # quantos pares baixar OHLC
+DEBUG_SCORE    = os.getenv("DEBUG_SCORE", "false").lower() == "true"
 
-# Lista de 20 pares
+# ===== PARES (20) =====
 SYMBOL_TO_ID = {
     "BTCUSDT":  "bitcoin",
     "ETHUSDT":  "ethereum",
@@ -37,27 +37,27 @@ SYMBOL_TO_ID = {
 }
 SYMBOLS = list(SYMBOL_TO_ID.keys())
 
-def log(msg):
+def log(msg: str):
     print(msg, flush=True)
 
 def run_pipeline():
     # 1) Preços/variação em BULK (1 chamada)
     ids = [SYMBOL_TO_ID[s] for s in SYMBOLS]
     log("🧩 Coletando PREÇOS em lote (bulk)…")
-    bulk = fetch_bulk_prices(ids)  # dict por ID do CG
+    bulk = fetch_bulk_prices(ids)  # dict por ID do CoinGecko
 
     # 2) Ranking por volatilidade 24h e seleção TOP N
     ranked = []
     for s in SYMBOLS:
         cid = SYMBOL_TO_ID[s]
         info = bulk.get(cid)
-        if not info: 
+        if not info:
             continue
         change = float(info.get("usd_24h_change", 0.0))
         ranked.append((s, abs(change)))
 
     ranked.sort(key=lambda t: t[1], reverse=True)
-    selected = [sym for sym, _ in ranked[:max(1, TOP_SYMBOLS))]
+    selected = [sym for sym, _ in ranked[:max(1, TOP_SYMBOLS)]]
     log(f"✅ Selecionados para OHLC: {', '.join(selected)}")
 
     # 3) Coleta OHLC só dos selecionados
@@ -103,7 +103,7 @@ def run_pipeline():
             else:
                 log(f"⛔ {s} descartado (<{int(MIN_CONFIDENCE*100)}%)")
 
-    # 6) Persistência dos sinais aprovados
+    # 6) Persistência
     with open("signals.json", "w") as f:
         json.dump(approved, f, indent=2)
     log(f"💾 {len(approved)} sinais salvos em signals.json")
@@ -113,7 +113,6 @@ def run_pipeline():
         publish_many(approved)
         log("📨 Sinais enviados ao Telegram.")
 
-    # 8) (Opcional) Registrar execução
     log(f"🕒 Fim: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
 if __name__ == "__main__":
