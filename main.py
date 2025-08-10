@@ -46,7 +46,7 @@ def run_pipeline():
         for s in block:
             cid = SYMBOL_TO_ID.get(s, s.replace("USDT","").lower())
             log(f"📊 Coletando OHLC {s}…")
-            data = fetch_ohlc(cid, days=2)
+            data = fetch_ohlc(cid, days=3)
             if data:
                 candles = []
                 for row in data:
