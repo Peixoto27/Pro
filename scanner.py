@@ -5,25 +5,21 @@ from signal_generator import generate_signal
 from notifier import send_signal_notification
 from state_manager import load_open_trades, save_open_trades, check_and_notify_closed_trades
 
-# --- Módulos placeholder para evitar erros de importação --- 
-# Estes módulos precisarão ser implementados ou substituídos por versões reais
-# se o usuário quiser a funcionalidade completa de gerenciamento de estado, notificação e sentimento.
-
 def get_sentiment_score(symbol):
-    return 0.5  # Retorna um valor neutro para teste
+    return 0.5  # Valor neutro para teste
 
-# --- CONFIGURAÇÕES --- 
+# --- CONFIGURAÇÕES ---
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
     "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "TONUSDT",
     "INJUSDT", "RNDRUSDT", "ARBUSDT", "LTCUSDT", "MATICUSDT",
-    "OPUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT", "SEIUSDT"
+    "OPUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT", "SEIUSDT",
+    # Novas moedas adicionadas
+    "TRXUSDT", "DOGEUSDT", "SHIBUSDT", "FILUSDT", "SUIUSDT"
 ]
-USAR_SENTIMENTO = False  # Desativado por padrão para simplificar o teste inicial
+USAR_SENTIMENTO = True
 
 def get_macro_trend(df, symbol):
-    # Esta função precisa de 'ta' e um DataFrame com dados suficientes
-    # Para simplificar o teste inicial, vamos retornar sempre 'ALTA'
     return "ALTA"
 
 def run_scanner():
@@ -76,7 +72,6 @@ def run_scanner():
 
             sentiment_score = 0.0
             if USAR_SENTIMENTO:
-                print(f"✅ Pré-condição técnica encontrada para {symbol}. Buscando sentimento...")
                 sentiment_score = get_sentiment_score(symbol)
                 if sentiment_score < 0:
                     print(f"⚪ Sentimento negativo ({sentiment_score:.2f}) para {symbol}. Pulando...")
@@ -87,11 +82,24 @@ def run_scanner():
             if signal:
                 print(f"🔥 SINAL ENCONTRADO PARA {symbol}!")
                 try:
-                    if send_signal_notification(signal):
+                    # Reformata mensagem para ficar mais bonita
+                    signal_text = (
+                        f"🚀 *NOVA OPORTUNIDADE DE TRADE*\n\n"
+                        f"📌 *Par:* {signal['symbol']}\n"
+                        f"🎯 *Entrada:* `{signal['entry_price']}`\n"
+                        f"🎯 *Alvo:* `{signal['target_price']}`\n"
+                        f"🛑 *Stop Loss:* `{signal['stop_loss']}`\n\n"
+                        f"📊 *Risco/Retorno:* `{signal['risk_reward']}`\n"
+                        f"📈 *Confiança:* `{signal['confidence_score']}%`\n\n"
+                        f"🧠 Estratégia: `{signal['strategy']}`\n"
+                        f"📅 Criado em: `{signal['created_at']}`\n"
+                        f"🆔 ID: `{signal['id']}`"
+                    )
+                    if send_signal_notification(signal_text):
                         open_trades[symbol] = signal
                         save_open_trades(open_trades)
                     else:
-                        print(f"⚠️ Falha ao enviar sinal para {symbol}, não será salvo como trade aberto.")
+                        print(f"⚠️ Falha ao enviar sinal para {symbol}")
                 except Exception as e:
                     print(f"🚨 Erro ao enviar notificação para {symbol}: {e}")
             else:
