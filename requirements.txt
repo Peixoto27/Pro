@@ -5,3 +5,5 @@ ta
 textblob
 scikit-learn
 xgboost
+numpy
+joblib
