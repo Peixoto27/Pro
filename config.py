@@ -1,35 +1,38 @@
+# -*- coding: utf-8 -*-
 import os
+from dotenv import load_dotenv
 
-# === Configurações Gerais ===
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-DEBUG_SCORE = os.getenv("DEBUG_SCORE", "False").lower() == "true"
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+# Carrega .env da raiz
+load_dotenv()
 
-# === API Keys ===
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+# ===== Qualidade / Debug =====
+# Use 0.75 (fração). Se quiser 75 (percentual), adapte no apply_strategies.
+MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.75"))
+DEBUG_SCORE    = os.getenv("DEBUG_SCORE", "false").lower() == "true"
+LOG_LEVEL      = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# === Configurações de Sinais ===
-MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", 75))  # publicar sinais acima de 75%
-MAX_SYMBOLS = int(os.getenv("MAX_SYMBOLS", 20))          # máximo de moedas analisadas
-TOP_SYMBOLS = int(os.getenv("TOP_SYMBOLS", 20))          # quantas moedas rankear p/ OHLC
+# ===== Seleção de pares =====
+# Ex.: "BTCUSDT,ETHUSDT,BNBUSDT"
+SYMBOLS = [s.strip() for s in os.getenv(
+    "SYMBOLS",
+    "BTCUSDT,ETHUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,SOLUSDT,MATICUSDT,DOTUSDT,LTCUSDT,LINKUSDT"
+).split(",") if s.strip()]
 
-# === Configurações de Delay e Tentativas para CoinGecko ===
-API_DELAY_BULK = float(os.getenv("API_DELAY_BULK", 2.5))  # segundos entre chamadas de preço em lote
-API_DELAY_OHLC = float(os.getenv("API_DELAY_OHLC", 12.0)) # segundos entre chamadas OHLC
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", 6))            # número máximo de tentativas
-BACKOFF_BASE = float(os.getenv("BACKOFF_BASE", 2.5))      # tempo base para backoff exponencial
+# ===== Delays / Retry (CoinGecko) =====
+API_DELAY_BULK  = float(os.getenv("API_DELAY_BULK", 2.5))   # /simple/price
+API_DELAY_OHLC  = float(os.getenv("API_DELAY_OHLC", 12.0))  # /ohlc
+MAX_RETRIES     = int(os.getenv("MAX_RETRIES", 6))
+BACKOFF_BASE    = float(os.getenv("BACKOFF_BASE", 2.5))
 
-# === Configuração de Batching ===
-BATCH_OHLC = int(os.getenv("BATCH_OHLC", 8))              # quantos OHLC por bloco
-BATCH_PAUSE_SEC = int(os.getenv("BATCH_PAUSE_SEC", 60))   # pausa entre blocos (segundos)
+# Batching para OHLC (se seu main usar blocos)
+BATCH_OHLC       = int(os.getenv("BATCH_OHLC", 8))
+BATCH_PAUSE_SEC  = int(os.getenv("BATCH_PAUSE_SEC", 60))
 
-# === Configuração do Telegram ===
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# ===== Telegram (se usar no notifier) =====
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", os.getenv("BOT_TOKEN", ""))
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
 
-# === Pastas e Arquivos ===
-DATA_RAW_FILE = "data_raw.json"
-SIGNALS_FILE = "signals.json"
-MODEL_FILE = "model.pkl"
+# ===== Arquivos =====
+DATA_RAW_FILE = os.getenv("DATA_RAW_FILE", "data_raw.json")
+SIGNALS_FILE  = os.getenv("SIGNALS_FILE",  "signals.json")
+HISTORY_FILE  = os.getenv("HISTORY_FILE",  "history.json")
