@@ -1,4 +1,3 @@
-import os
 import time
 from datetime import datetime
 from price_fetcher import fetch_all_data
@@ -8,40 +7,28 @@ from notifier import send_signal_notification
 from state_manager import load_open_trades, save_open_trades, check_and_notify_closed_trades
 from ai_predictor import predict_success_proba
 
-# === sentimento (você já tem essa função implementada com NewsAPI) ===
-def get_sentiment_score(symbol):
-    # sua implementação atual aqui (NewsAPI + TextBlob, etc.)
-    return 0.0
-
 # --- CONFIGURAÇÕES ---
 SYMBOLS = [
-    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
-    "ADAUSDT","AVAXUSDT","DOTUSDT","LINKUSDT","TONUSDT",
-    "INJUSDT","RNDRUSDT","ARBUSDT","LTCUSDT","MATICUSDT",
-    "OPUSDT","NEARUSDT","APTUSDT","PEPEUSDT","SEIUSDT",
-    "TRXUSDT","DOGEUSDT","SHIBUSDT","FILUSDT","SUIUSDT"
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+    "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "TONUSDT",
+    "INJUSDT", "RNDRUSDT", "ARBUSDT", "LTCUSDT", "MATICUSDT",
+    "OPUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT", "SEIUSDT",
+    "TRXUSDT", "DOGEUSDT", "SHIBUSDT", "FILUSDT", "SUIUSDT"
 ]
 USAR_SENTIMENTO = True
 
 def get_macro_trend(df, symbol):
     return "ALTA"
 
-def _safe(v, default=0.0):
-    try:
-        return float(v) if v is not None else float(default)
-    except Exception:
-        return float(default)
-
 def run_scanner():
     print("\n--- Iniciando novo ciclo do scanner ---")
-
+    
     try:
         open_trades = load_open_trades()
     except Exception as e:
         print(f"⚠️ Erro ao carregar trades abertos: {e}")
         open_trades = {}
 
-    # monitora sinais abertos
     try:
         market_data_for_monitoring = fetch_all_data(list(open_trades.keys()))
         check_and_notify_closed_trades(open_trades, market_data_for_monitoring, send_signal_notification)
@@ -76,26 +63,31 @@ def run_scanner():
                 continue
             print("✅ Indicadores calculados com sucesso.")
 
-            if get_macro_trend(df, symbol) != "ALTA":
+            tendencia_macro = get_macro_trend(df, symbol)
+            if tendencia_macro != "ALTA":
                 print(f"⚪ Tendência macro não é de ALTA para {symbol}. Pulando...")
                 continue
 
-            # === SENTIMENTO ===
             sentiment_score = 0.0
             if USAR_SENTIMENTO:
+                from sentiment import get_sentiment_score
                 sentiment_score = get_sentiment_score(symbol)
                 print(f"🧠 Sentimento para {symbol}: {sentiment_score:.2f}")
                 if sentiment_score < 0:
-                    print(f"⚪ Sentimento negativo ({sentiment_score:.2f}). Pulando {symbol}…")
+                    print(f"⚪ Sentimento negativo ({sentiment_score:.2f}) para {symbol}. Pulando...")
                     continue
 
-            # === FEATURES PARA IA ===
+            # === IA: monta features para predição ===
             row = df_with_indicators.iloc[-1]
+            def _safe(v, default=0.0):
+                try:
+                    return float(v) if v is not None else float(default)
+                except Exception:
+                    return float(default)
             close = _safe(row.get("close"), 0)
             sma50 = _safe(row.get("sma_50", row.get("sma50", 0)), 0)
-            vol   = _safe(row.get("volume"), 1)
+            vol = _safe(row.get("volume"), 1)
             v_sma20 = _safe(row.get("volume_sma_20", row.get("v_sma20", 1)), 1)
-
             feats = {
                 "rsi": _safe(row.get("rsi"), 0),
                 "macd_diff": _safe(row.get("macd_diff"), 0),
@@ -104,7 +96,6 @@ def run_scanner():
                 "volatility": _safe(row.get("volatility"), 0),
                 "momentum": _safe(row.get("momentum"), 0),
             }
-
             created_dt = datetime.utcnow()
             proba = predict_success_proba({
                 "symbol": symbol,
@@ -114,56 +105,45 @@ def run_scanner():
                 "volume_ratio": feats["volume_ratio"],
                 "volatility": feats["volatility"],
                 "momentum": feats["momentum"],
-                "sentiment_score": sentiment_score if USAR_SENTIMENTO else 0.0,
+                "sentiment_score": sentiment_score,
                 "hour_of_day": created_dt.hour,
                 "day_of_week": created_dt.weekday(),
-                # se tiver um score técnico próprio, passe aqui. senão, deixe 70 como base.
-                "confidence_score": _safe(row.get("confidence_score", 70))
+                "confidence_score": 70.0,
             })
-
             print(f"🤖 Probabilidade IA para {symbol}: {proba:.2f}")
             if proba < 0.60:
                 print(f"⚪ IA recomendou PULAR ({proba:.2f}). Pulando {symbol}…")
                 continue
 
-            # === GERAÇÃO DO SINAL (sua lógica atual) ===
             signal = generate_signal(df_with_indicators, symbol)
-
+            
             if signal:
                 print(f"🔥 SINAL ENCONTRADO PARA {symbol}!")
-                try:
-                    caution = "⚠️ *Cautela:* prob. intermediária.\n" if 0.60 <= proba < 0.75 else ""
-                    signal_text = (
-                        f"🚀 *NOVA OPORTUNIDADE DE TRADE*\n\n"
-                        f"📌 *Par:* {signal['symbol']}\n"
-                        f"🎯 *Entrada:* `{signal['entry_price']}`\n"
-                        f"🎯 *Alvo:* `{signal['target_price']}`\n"
-                        f"🛑 *Stop Loss:* `{signal['stop_loss']}`\n\n"
-                        f"📊 *Risco/Retorno:* `{signal['risk_reward']}`\n"
-                        f"📈 *Confiança (técnico):* `{signal['confidence_score']}%`\n"
-                        f"🤖 *Prob. IA:* `{proba:.2f}`\n"
-                        f"{caution}"
-                        f"🧠 Estratégia: `{signal['strategy']}`\n"
-                        f"📅 Criado em: `{signal['created_at']}`\n"
-                        f"🆔 ID: `{signal['id']}`"
-                    )
-                    if send_signal_notification(signal_text):
-                        open_trades[symbol] = signal
-                        save_open_trades(open_trades)
-                    else:
-                        print(f"⚠️ Falha ao enviar sinal para {symbol}")
-                except Exception as e:
-                    print(f"🚨 Erro ao enviar notificação para {symbol}: {e}")
+                caution = "⚠️ *Cautela:* prob. intermediária.\n" if 0.60 <= proba < 0.75 else ""
+                signal_text = (
+                    f"🚀 *NOVA OPORTUNIDADE DE TRADE*\n\n"
+                    f"📌 *Par:* {signal['symbol']}\n"
+                    f"🎯 *Entrada:* `{signal['entry_price']}`\n"
+                    f"🎯 *Alvo:* `{signal['target_price']}`\n"
+                    f"🛑 *Stop Loss:* `{signal['stop_loss']}`\n\n"
+                    f"📊 *Risco/Retorno:* `{signal['risk_reward']}`\n"
+                    f"📈 *Confiança (técnico):* `{signal['confidence_score']}%`\n"
+                    f"🤖 *Prob. IA:* `{proba:.2f}`\n"
+                    f"{caution}"
+                    f"🧠 Estratégia: `{signal['strategy']}`\n"
+                    f"📅 Criado em: `{signal['created_at']}`\n"
+                    f"🆔 ID: `{signal['id']}`"
+                )
+                if send_signal_notification(signal_text):
+                    open_trades[symbol] = signal
+                    save_open_trades(open_trades)
+                else:
+                    print(f"⚠️ Falha ao enviar sinal para {symbol}")
             else:
                 print(f"⚪ Sem sinal para {symbol} após análise final.")
+
         except Exception as e:
             print(f"🚨 Erro inesperado ao processar {symbol}: {e}")
 
 if __name__ == "__main__":
-    while True:
-        try:
-            run_scanner()
-        except Exception as e:
-            print(f"🚨 ERRO CRÍTICO NO LOOP PRINCIPAL: {e}")
-        print("\n--- Ciclo concluído. Aguardando 15 minutos... ---")
-        time.sleep(900)
+    run_scanner()
