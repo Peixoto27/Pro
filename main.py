@@ -9,10 +9,10 @@ from publisher import publish_many
 
 # ===== CONFIG =====
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.75"))
-TOP_SYMBOLS = int(os.getenv("TOP_SYMBOLS", "10"))  # quantos pares baixar OHLC
+TOP_SYMBOLS = int(os.getenv("TOP_SYMBOLS", "20"))  # Usando todas as 20 moedas
 DEBUG_SCORE = os.getenv("DEBUG_SCORE", "false").lower() == "true"
 
-# Mapeamento TICKER -> CoinGecko ID (20 pares)
+# Lista de 20 pares
 SYMBOL_TO_ID = {
     "BTCUSDT":  "bitcoin",
     "ETHUSDT":  "ethereum",
@@ -41,12 +41,12 @@ def log(msg):
     print(msg, flush=True)
 
 def run_pipeline():
-    # 1) preços/variação em BULK (1 chamada)
+    # 1) Preços/variação em BULK (1 chamada)
     ids = [SYMBOL_TO_ID[s] for s in SYMBOLS]
     log("🧩 Coletando PREÇOS em lote (bulk)…")
     bulk = fetch_bulk_prices(ids)  # dict por ID do CG
 
-    # 2) ranking por volatilidade 24h e seleção TOP N
+    # 2) Ranking por volatilidade 24h e seleção TOP N
     ranked = []
     for s in SYMBOLS:
         cid = SYMBOL_TO_ID[s]
@@ -57,17 +57,16 @@ def run_pipeline():
         ranked.append((s, abs(change)))
 
     ranked.sort(key=lambda t: t[1], reverse=True)
-    selected = [sym for sym, _ in ranked[:max(1, TOP_SYMBOLS)]]
+    selected = [sym for sym, _ in ranked[:max(1, TOP_SYMBOLS))]
     log(f"✅ Selecionados para OHLC: {', '.join(selected)}")
 
-    # 3) coleta OHLC só dos selecionados
+    # 3) Coleta OHLC só dos selecionados
     all_data = []
     for s in selected:
         cid = SYMBOL_TO_ID[s]
         log(f"📊 Coletando OHLC {s}…")
         data = fetch_ohlc(cid, days=1)
         if data:
-            # normaliza candles
             candles = []
             for row in data:
                 ts, o, h, l, c = row
@@ -83,12 +82,12 @@ def run_pipeline():
         else:
             log(f"   → ❌ Dados insuficientes para {s}")
 
-    # 4) salva bruto para auditoria
+    # 4) Salva bruto para auditoria
     with open("data_raw.json", "w") as f:
         json.dump(all_data, f, indent=2)
     log(f"💾 Salvo data_raw.json ({len(all_data)} ativos)")
 
-    # 5) gera e filtra sinais
+    # 5) Gera e filtra sinais
     approved = []
     for item in all_data:
         s = item["symbol"]
@@ -98,27 +97,25 @@ def run_pipeline():
             log(f"✅ {s} aprovado ({int(sig['confidence']*100)}%)")
         else:
             if DEBUG_SCORE:
-                # log opcional para diagnóstico do score
+                # Log opcional para diagnóstico do score
                 from statistics import fmean
                 closes = [c["close"] for c in item["ohlc"]]
-                # tentativa de obter score bruto
-                from apply_strategies import score_signal
                 sc = score_signal(closes)
                 log(f"⛔ {s} descartado (score={None if sc is None else round(sc*100,1)}% < {int(MIN_CONFIDENCE*100)}%)")
             else:
                 log(f"⛔ {s} descartado (<{int(MIN_CONFIDENCE*100)}%)")
 
-    # 6) persistência dos sinais aprovados
+    # 6) Persistência dos sinais aprovados
     with open("signals.json", "w") as f:
         json.dump(approved, f, indent=2)
     log(f"💾 {len(approved)} sinais salvos em signals.json")
 
-    # 7) publicação
+    # 7) Publicação
     if approved:
         publish_many(approved)
         log("📨 Sinais enviados ao Telegram.")
 
-    # 8) (opcional) registrar run
+    # 8) (Opcional) Registrar execução
     log(f"🕒 Fim: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
 if __name__ == "__main__":
