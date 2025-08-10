@@ -1,12 +1,12 @@
+import os
 import time
+import requests
+from textblob import TextBlob
 from price_fetcher import fetch_all_data
 from technical_indicators import calculate_indicators
 from signal_generator import generate_signal
 from notifier import send_signal_notification
 from state_manager import load_open_trades, save_open_trades, check_and_notify_closed_trades
-
-def get_sentiment_score(symbol):
-    return 0.5  # Valor neutro para teste
 
 # --- CONFIGURAÇÕES ---
 SYMBOLS = [
@@ -14,10 +14,81 @@ SYMBOLS = [
     "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "TONUSDT",
     "INJUSDT", "RNDRUSDT", "ARBUSDT", "LTCUSDT", "MATICUSDT",
     "OPUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT", "SEIUSDT",
-    # Novas moedas adicionadas
     "TRXUSDT", "DOGEUSDT", "SHIBUSDT", "FILUSDT", "SUIUSDT"
 ]
+
 USAR_SENTIMENTO = True
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+NEWS_API_URL = "https://newsapi.org/v2/everything"
+
+# Cache para evitar chamadas repetidas
+_sentiment_cache = {}
+
+# Mapeamento de símbolos para nomes legíveis
+symbol_map = {
+    "BTCUSDT": "Bitcoin",
+    "ETHUSDT": "Ethereum",
+    "BNBUSDT": "Binance Coin",
+    "SOLUSDT": "Solana",
+    "XRPUSDT": "XRP",
+    "ADAUSDT": "Cardano",
+    "AVAXUSDT": "Avalanche",
+    "DOTUSDT": "Polkadot",
+    "LINKUSDT": "Chainlink",
+    "TONUSDT": "Toncoin",
+    "INJUSDT": "Injective",
+    "RNDRUSDT": "Render Token",
+    "ARBUSDT": "Arbitrum",
+    "LTCUSDT": "Litecoin",
+    "MATICUSDT": "Polygon",
+    "OPUSDT": "Optimism",
+    "NEARUSDT": "Near Protocol",
+    "APTUSDT": "Aptos",
+    "PEPEUSDT": "Pepe",
+    "SEIUSDT": "Sei Network",
+    "TRXUSDT": "Tron",
+    "DOGEUSDT": "Dogecoin",
+    "SHIBUSDT": "Shiba Inu",
+    "FILUSDT": "Filecoin",
+    "SUIUSDT": "Sui"
+}
+
+def get_sentiment_score(symbol):
+    # Se já buscamos nessa execução, retorna do cache
+    if symbol in _sentiment_cache:
+        return _sentiment_cache[symbol]
+
+    query = symbol_map.get(symbol, symbol)
+    try:
+        params = {
+            "q": query,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 5,
+            "apiKey": NEWS_API_KEY
+        }
+        resp = requests.get(NEWS_API_URL, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data.get("articles"):
+            _sentiment_cache[symbol] = 0
+            return 0
+
+        sentiment_sum = 0
+        for article in data["articles"]:
+            text = (article.get("title") or "") + " " + (article.get("description") or "")
+            analysis = TextBlob(text)
+            sentiment_sum += analysis.sentiment.polarity
+
+        score = sentiment_sum / len(data["articles"])
+        _sentiment_cache[symbol] = score
+        return score
+
+    except Exception as e:
+        print(f"⚠️ Erro ao buscar sentimento para {symbol}: {e}")
+        _sentiment_cache[symbol] = 0
+        return 0
 
 def get_macro_trend(df, symbol):
     return "ALTA"
@@ -73,6 +144,7 @@ def run_scanner():
             sentiment_score = 0.0
             if USAR_SENTIMENTO:
                 sentiment_score = get_sentiment_score(symbol)
+                print(f"🧠 Sentimento para {symbol}: {sentiment_score:.2f}")
                 if sentiment_score < 0:
                     print(f"⚪ Sentimento negativo ({sentiment_score:.2f}) para {symbol}. Pulando...")
                     continue
@@ -82,7 +154,6 @@ def run_scanner():
             if signal:
                 print(f"🔥 SINAL ENCONTRADO PARA {symbol}!")
                 try:
-                    # Reformata mensagem para ficar mais bonita
                     signal_text = (
                         f"🚀 *NOVA OPORTUNIDADE DE TRADE*\n\n"
                         f"📌 *Par:* {signal['symbol']}\n"
