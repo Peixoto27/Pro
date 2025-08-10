@@ -1,41 +1,44 @@
-import subprocess
-import os
+# -*- coding: utf-8 -*-
 import json
-from datetime import datetime, timezone
+from scanner import main as collect_now
+from apply_strategies import generate_signal
+from publisher import publish_many
+from config import MIN_CONFIDENCE
+import train_ai_model
 
-LAST_TRAIN_FILE = "last_train.json"
+def load_raw():
+    with open("data_raw.json","r") as f:
+        return json.load(f)
 
-def run_script(script_name):
-    print(f"[MAIN] Executando: {script_name}")
-    result = subprocess.call(["python", script_name])
-    print(f"[MAIN] Finalizado: {script_name} (código {result})")
-    return result
+def run_pipeline():
+    # 1) coleta
+    collect_now()
 
-def should_train():
-    if not os.path.exists(LAST_TRAIN_FILE):
-        return True
-    try:
-        with open(LAST_TRAIN_FILE, "r") as f:
-            data = json.load(f)
-        last_run = datetime.fromisoformat(data.get("last_train"))
-        diff_minutes = (datetime.now(timezone.utc) - last_run).total_seconds() / 60
-        return diff_minutes >= 60
-    except Exception:
-        return True
+    # 2) geração de sinais
+    raw = load_raw()
+    approved = []
+    for item in raw:
+        symbol = item["symbol"]
+        candles = item["ohlc"]
+        sig = generate_signal(symbol, candles)
+        if sig:
+            approved.append(sig)
+            print(f"✅ {symbol} aprovado ({int(sig['confidence']*100)}%)")
+        else:
+            print(f"⛔ {symbol} descartado (<{int(MIN_CONFIDENCE*100)}%)")
 
-def update_last_train():
-    with open(LAST_TRAIN_FILE, "w") as f:
-        json.dump({"last_train": datetime.now(timezone.utc).isoformat()}, f)
+    # 3) persiste
+    with open("signals.json","w") as f:
+        json.dump(approved, f, indent=2)
+    print(f"💾 {len(approved)} sinais salvos em signals.json")
+
+    # 4) publica (Telegram)
+    if approved:
+        publish_many(approved)
+        print("📨 Sinais enviados ao Telegram.")
+
+    # 5) treino opcional
+    train_ai_model.main()
 
 if __name__ == "__main__":
-    print("\n========== NOVA EXECUÇÃO ==========")
-    run_script("scanner.py")
-
-    if should_train():
-        print("[MAIN] Hora de treinar a IA...")
-        run_script("train_ai_model.py")
-        update_last_train()
-    else:
-        print("[MAIN] Treino pulado, menos de 1h desde o último.")
-
-    print("========== EXECUÇÃO FINALIZADA ==========\n")
+    run_pipeline()
