@@ -23,3 +23,12 @@ LOG_LEVEL        = os.getenv("LOG_LEVEL", "INFO").upper()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+# Delay entre chamadas à API CoinGecko (segundos)
+API_DELAY_BULK = 2.5    # para /simple/price
+API_DELAY_OHLC = 2.5    # para /ohlc
+
+# Quantidade máxima de tentativas por chamada
+MAX_RETRIES = 4
+
+# Tempo base de espera no backoff exponencial
+BACKOFF_BASE = 2
