@@ -1,113 +1,88 @@
-# scanner.py (versão corrigida com integração de sentimento e fallback)
-
-import ccxt
-import pandas as pd
 import time
-from ta.momentum import RSIIndicator
-from ta.trend import MACD, EMAIndicator
-from ta.volatility import BollingerBands
+import requests
+import json
+import os
 
-# --- Import do analisador de sentimento com fallback ---
-try:
-    from sentiment_analyzer import get_sentiment_score
-except Exception as e:
-    print(f"[SENTIMENT] Falha ao importar sentiment_analyzer ({e}). Usando sentimento neutro.")
-    def get_sentiment_score(symbol: str) -> float:
-        return 0.0
-
-# --- Configurações ---
-EXCHANGE = ccxt.binance()
+# Lista de pares para analisar
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT",
-    "DOGEUSDT", "SOLUSDT", "MATICUSDT", "LTCUSDT", "TRXUSDT",
-    "SHIBUSDT", "AVAXUSDT", "NEARUSDT", "APTUSDT", "PEPEUSDT",
-    "SUIUSDT", "OPUSDT", "INJUSDT", "SEIUSDT", "TONUSDT"
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
+    "SOLUSDT", "DOGEUSDT", "MATICUSDT", "DOTUSDT", "LTCUSDT"
 ]
-TIMEFRAME = "1h"
-LIMIT = 100
 
-def fetch_data(symbol):
-    """Baixa dados OHLCV da Binance e retorna DataFrame formatado."""
+COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
+BINANCE_URL = "https://api.binance.com/api/v3/ticker/24hr"
+
+OUTPUT_FILE = "signals.json"
+
+def get_from_coingecko(symbol):
+    """Busca preço no CoinGecko."""
     try:
-        ohlcv = EXCHANGE.fetch_ohlcv(symbol, TIMEFRAME, limit=LIMIT)
-        df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        return df
+        coin_id = symbol.replace("USDT", "").lower()
+        params = {
+            "ids": coin_id,
+            "vs_currencies": "usd",
+            "include_24hr_change": "true"
+        }
+        r = requests.get(COINGECKO_URL, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if coin_id in data:
+            return {
+                "price": data[coin_id]["usd"],
+                "change24h": data[coin_id]["usd_24h_change"]
+            }
     except Exception as e:
-        print(f"⚠️ Erro ao buscar dados para {symbol}: {e}")
-        return None
+        print(f"⚠️ Erro CoinGecko {symbol}: {e}")
+    return None
 
-def analyze_indicators(df):
-    """Calcula indicadores técnicos e retorna sinais."""
+def get_from_binance(symbol):
+    """Busca preço na Binance."""
     try:
-        df["rsi"] = RSIIndicator(df["close"], window=14).rsi()
-        macd = MACD(df["close"])
-        df["macd"] = macd.macd()
-        df["macd_signal"] = macd.macd_signal()
-        ema = EMAIndicator(df["close"], window=50)
-        df["ema50"] = ema.ema_indicator()
-        bb = BollingerBands(df["close"], window=20, window_dev=2)
-        df["bb_high"] = bb.bollinger_hband()
-        df["bb_low"] = bb.bollinger_lband()
-        return df
-    except Exception as e:
-        print(f"⚠️ Erro ao calcular indicadores: {e}")
-        return df
-
-def generate_signal(df, symbol):
-    """Gera sinal de trade baseado nos indicadores e sentimento."""
-    try:
-        last_row = df.iloc[-1]
-        rsi = last_row["rsi"]
-        macd_val = last_row["macd"]
-        macd_signal = last_row["macd_signal"]
-        price = last_row["close"]
-        ema50 = last_row["ema50"]
-
-        # Calcula sentimento
-        sentiment_score = get_sentiment_score(symbol)
-        
-        # Lógica simples de exemplo (pode ser evoluída com IA)
-        if rsi < 30 and macd_val > macd_signal and price > ema50:
-            decision = "BUY"
-        elif rsi > 70 and macd_val < macd_signal and price < ema50:
-            decision = "SELL"
-        else:
-            decision = "HOLD"
-
+        params = {"symbol": symbol}
+        r = requests.get(BINANCE_URL, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
         return {
-            "symbol": symbol,
-            "price": price,
-            "rsi": rsi,
-            "macd": macd_val,
-            "macd_signal": macd_signal,
-            "ema50": ema50,
-            "sentiment": sentiment_score,
-            "signal": decision
+            "price": float(data["lastPrice"]),
+            "change24h": float(data["priceChangePercent"])
         }
     except Exception as e:
-        print(f"⚠️ Erro ao gerar sinal para {symbol}: {e}")
-        return None
+        print(f"⚠️ Erro Binance {symbol}: {e}")
+    return None
 
 def main():
-    print("[MAIN] Iniciando scanner...")
-    all_signals = []
+    signals = []
     
     for symbol in SYMBOLS:
-        print(f"\n🪙 Analisando {symbol}...")
-        df = fetch_data(symbol)
-        if df is None:
-            continue
-        df = analyze_indicators(df)
-        signal_data = generate_signal(df, symbol)
-        if signal_data:
-            print(f"✅ Indicadores calculados com sucesso. Sinal: {signal_data['signal']} | Sentimento: {signal_data['sentiment']:.2f}")
-            all_signals.append(signal_data)
-        time.sleep(1.5)  # Delay para evitar limite da API
-    
-    print("\n📊 Sinais gerados:")
-    for sig in all_signals:
-        print(sig)
+        print(f"📊 Analisando {symbol}...")
+        
+        # 1. CoinGecko primeiro
+        result = get_from_coingecko(symbol)
+        
+        # 2. Fallback Binance se CoinGecko falhar
+        if not result:
+            print(f"🔁 CoinGecko indisponível para {symbol}. Tentando Binance...")
+            result = get_from_binance(symbol)
+        
+        if result:
+            signals.append({
+                "symbol": symbol,
+                "price": result["price"],
+                "change24h": result["change24h"],
+                "timestamp": time.time()
+            })
+            print(f"✅ {symbol} -> Preço: {result['price']}, Variação 24h: {result['change24h']}%")
+        else:
+            print(f"❌ Não foi possível obter dados para {symbol}")
+        
+        # Delay para evitar bloqueios
+        time.sleep(2.5)
+
+    # Salva sinais
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(signals, f, indent=4)
+
+    print(f"\n💾 {len(signals)} sinais salvos em {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     main()
