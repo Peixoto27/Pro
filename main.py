@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 from coingecko_client import fetch_bulk_prices, fetch_ohlc
-from apply_strategies import generate_signal
+from apply_strategies import generate_signal, score_signal
 from publisher import publish_many
 
 # ===== CONFIG =====
@@ -97,11 +97,9 @@ def run_pipeline():
             log(f"✅ {s} aprovado ({int(sig['confidence']*100)}%)")
         else:
             if DEBUG_SCORE:
-                # Log opcional para diagnóstico do score
-                from statistics import fmean
                 closes = [c["close"] for c in item["ohlc"]]
                 sc = score_signal(closes)
-                log(f"⛔ {s} descartado (score={None if sc is None else round(sc*100,1)}% < {int(MIN_CONFIDENCE*100)}%)")
+                log(f"ℹ️ Score {s}: {None if sc is None else round(sc*100,1)}% (min {int(MIN_CONFIDENCE*100)}%)")
             else:
                 log(f"⛔ {s} descartado (<{int(MIN_CONFIDENCE*100)}%)")
 
