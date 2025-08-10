@@ -1,19 +1,18 @@
-# sentiment_analyzer.py — otimizado p/ produção
+# sentiment_analyzer.py — versão final compatível com news_fetcher.get_recent_news(symbol)
 import os
 import time
 from collections import deque
 from typing import List, Optional
 
 from textblob import TextBlob
-from news_fetcher import get_recent_news  # deve existir no projeto
+from news_fetcher import get_recent_news  # assinatura: get_recent_news(symbol)
 
 # ========================
 # Configs (ajustáveis via env)
 # ========================
 HOURLY_API_CALL_LIMIT = int(os.getenv("SENTI_HOURLY_LIMIT", "10"))          # chamadas/hora
-CACHE_DURATION        = int(os.getenv("SENTI_CACHE_SECONDS", str(2*60*60))) # 2h por padrão
-STALE_GRACE_SECONDS   = int(os.getenv("SENTI_STALE_GRACE", str(24*60*60)))  # usar cache vencido até 24h se API falhar
-NEWS_LIMIT_PER_QUERY  = int(os.getenv("SENTI_NEWS_LIMIT", "8"))             # qtde de notícias buscadas
+CACHE_DURATION        = int(os.getenv("SENTI_CACHE_SECONDS", str(2*60*60))) # 2h padrão
+STALE_GRACE_SECONDS   = int(os.getenv("SENTI_STALE_GRACE", str(24*60*60)))  # cache vencido permitido por +24h
 MIN_NEWS_FOR_SIGNAL   = int(os.getenv("SENTI_MIN_NEWS", "2"))               # mínimo p/ média; senão neutro
 
 # ========================
@@ -22,7 +21,7 @@ MIN_NEWS_FOR_SIGNAL   = int(os.getenv("SENTI_MIN_NEWS", "2"))               # m�
 api_call_timestamps: deque[float] = deque()
 sentiment_cache = {}  # { symbol: {"score": float, "timestamp": float } }
 
-# Nome legível para consulta de notícias
+# Mapa opcional (apenas para logs bonitos)
 _SYMBOL_MAP = {
     "BTCUSDT": "Bitcoin",      "ETHUSDT": "Ethereum",     "BNBUSDT": "Binance Coin",
     "SOLUSDT": "Solana",       "XRPUSDT": "XRP",          "ADAUSDT": "Cardano",
@@ -35,21 +34,14 @@ _SYMBOL_MAP = {
     "SUIUSDT": "Sui",
 }
 
-def _normalize_query(symbol: str) -> str:
-    # tenta mapear; se não tiver, usa símbolo bruto sem sufixo comum
-    if symbol in _SYMBOL_MAP:
-        return _SYMBOL_MAP[symbol]
-    # fallback simples: tira "USDT"/"USD"/"USDC"
-    for suf in ("USDT", "USD", "USDC"):
-        if symbol.endswith(suf):
-            return symbol[:-len(suf)]
-    return symbol
+def _nice(symbol: str) -> str:
+    return _SYMBOL_MAP.get(symbol, symbol)
 
 def _now() -> float:
     return time.time()
 
 def can_make_api_call() -> bool:
-    """Verifica janela de 1h para respeitar limite de chamadas."""
+    """Janela deslizante de 1h para respeitar limite de chamadas."""
     now = _now()
     while api_call_timestamps and api_call_timestamps[0] < now - 3600:
         api_call_timestamps.popleft()
@@ -58,10 +50,10 @@ def can_make_api_call() -> bool:
     print("🚦 Limite/hora atingido. Usando fallback/cache.")
     return False
 
-def _dedupe_titles(titles: List[str]) -> List[str]:
+def _dedupe_texts(texts: List[str]) -> List[str]:
     seen = set()
     unique = []
-    for t in titles:
+    for t in texts or []:
         t = (t or "").strip()
         if not t:
             continue
@@ -71,12 +63,11 @@ def _dedupe_titles(titles: List[str]) -> List[str]:
             unique.append(t)
     return unique
 
-def _compute_polarity(titles: List[str]) -> float:
-    if not titles:
+def _compute_polarity(texts: List[str]) -> float:
+    if not texts:
         return 0.0
-    total = 0.0
-    n = 0
-    for t in titles:
+    total, n = 0.0, 0
+    for t in texts:
         try:
             total += TextBlob(t).sentiment.polarity  # [-1, 1]
             n += 1
@@ -85,10 +76,8 @@ def _compute_polarity(titles: List[str]) -> float:
     if n == 0:
         return 0.0
     score = total / n
-    # pequenas oscilações ~ruído → aproxima de zero
-    if abs(score) < 0.05:
+    if abs(score) < 0.05:  # reduz ruído
         score = 0.0
-    # clamp/round
     return round(max(-1.0, min(1.0, score)), 2)
 
 def _get_cache(symbol: str, now: float) -> Optional[float]:
@@ -99,7 +88,7 @@ def _get_cache(symbol: str, now: float) -> Optional[float]:
     if age < CACHE_DURATION:
         print(f"🧠 Sentimento (cache válido) {symbol}: {item['score']:.2f}")
         return item["score"]
-    return None  # cache vencido; pode servir como stale se API falhar
+    return None
 
 def _get_stale_if_allowed(symbol: str, now: float) -> Optional[float]:
     item = sentiment_cache.get(symbol)
@@ -116,29 +105,26 @@ def get_sentiment_score(symbol: str) -> float:
     Retorna o sentimento médio [-1..1] para o símbolo.
     - Usa cache fresco quando disponível
     - Respeita cota/hora
-    - Em caso de erro/limite, tenta cache 'stale'; se não houver, retorna 0.0
+    - Se NewsAPI falhar ou limite estourar, usa cache 'stale' (até 24h) ou 0.0
     """
     now = _now()
 
-    # 1) tenta cache fresco
+    # 1) cache fresco
     cached = _get_cache(symbol, now)
     if cached is not None:
         return cached
 
-    # 2) se não há cache fresco, verifica cota
+    # 2) cota
     if not can_make_api_call():
         stale = _get_stale_if_allowed(symbol, now)
         return stale if stale is not None else 0.0
 
-    # 3) fará chamada — registra consumo de cota
+    # 3) consulta notícias (usa assinatura do seu news_fetcher)
     api_call_timestamps.append(now)
-    query = _normalize_query(symbol)
-    print(f"🌐 Buscando notícias para {symbol} (query='{query}', limit={NEWS_LIMIT_PER_QUERY})…")
-
     try:
-        # Ajuste a assinatura conforme seu news_fetcher
-        titles = get_recent_news(query=query, limit=NEWS_LIMIT_PER_QUERY)
-        titles = _dedupe_titles(titles or [])
+        print(f"🌐 Buscando notícias para {_nice(symbol)} ({symbol}) …")
+        titles = get_recent_news(symbol)  # <- usa a função que você já tem
+        titles = _dedupe_texts(titles)
 
         if len(titles) < MIN_NEWS_FOR_SIGNAL:
             score = 0.0
@@ -151,7 +137,6 @@ def get_sentiment_score(symbol: str) -> float:
 
     except Exception as e:
         print(f"⚠️ Falha ao buscar notícias para {symbol}: {e}")
-        # tenta usar cache stale
         stale = _get_stale_if_allowed(symbol, now)
         if stale is not None:
             return stale
