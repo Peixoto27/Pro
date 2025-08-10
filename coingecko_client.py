@@ -1,16 +1,12 @@
 import requests
 import time
 import random
+from config import API_DELAY_BULK, API_DELAY_OHLC, MAX_RETRIES, BACKOFF_BASE
 
 API_BASE = "https://api.coingecko.com/api/v3"
-MAX_RETRIES = 4
 
-# Configurações de delay
-API_DELAY_BULK = 2.5   # para coletar preços em lote
-API_DELAY_OHLC = 8.0   # delay maior para OHLC, evita 429
-
+# Função para buscar preços em lote (bulk)
 def fetch_bulk_prices(symbols):
-    """Coleta preços em lote (simple/price)"""
     ids = ",".join(symbols)
     url = f"{API_BASE}/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
     
@@ -18,30 +14,24 @@ def fetch_bulk_prices(symbols):
         try:
             resp = requests.get(url, timeout=10)
             resp.raise_for_status()
-            time.sleep(API_DELAY_BULK)  # delay rápido
+            time.sleep(API_DELAY_BULK)
             return resp.json()
         except Exception as e:
             print(f"⚠️ Erro bulk: {e} (tentativa {attempt+1}/{MAX_RETRIES})")
-            time.sleep(API_DELAY_BULK + random.uniform(0.5, 1.5))
+            time.sleep(API_DELAY_BULK + random.uniform(0.5, 1.5))  # Atraso aleatório
     return {}
 
+# Função para buscar OHLC de um ativo
 def fetch_ohlc(symbol_id, days=1, interval="30m"):
-    """Coleta OHLC para um ativo"""
     url = f"{API_BASE}/coins/{symbol_id}/ohlc?vs_currency=usd&days={days}"
     
     for attempt in range(MAX_RETRIES):
         try:
             resp = requests.get(url, timeout=10)
             resp.raise_for_status()
-            time.sleep(API_DELAY_OHLC + random.uniform(0.5, 1.5))  # delay maior + jitter
+            time.sleep(API_DELAY_OHLC + random.uniform(0.5, 1.5))  # Atraso maior + jitter
             return resp.json()
         except Exception as e:
             print(f"⚠️ Erro OHLC {symbol_id}: {e} (tentativa {attempt+1}/{MAX_RETRIES})")
-            time.sleep(API_DELAY_OHLC + random.uniform(1.0, 2.5))
+            time.sleep(API_DELAY_OHLC + random.uniform(1.0, 2.5))  # Backoff exponencial
     return []
-
-if __name__ == "__main__":
-    # Teste rápido
-    test_symbols = ["bitcoin", "ethereum", "binancecoin"]
-    print(fetch_bulk_prices(test_symbols))
-    print(fetch_ohlc("bitcoin"))
