@@ -1,34 +1,29 @@
-# -*- coding: utf-8 -*-
 import os
-from dotenv import load_dotenv
-load_dotenv()
 
-def getenv_float(k, d):
-    try:
-        return float(os.getenv(k, str(d)))
-    except:
-        return d
+# === Configurações Gerais ===
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-TRAINING_ENABLED = os.getenv("TRAINING_ENABLED","false").lower() == "true"
-MIN_CONFIDENCE   = getenv_float("MIN_CONFIDENCE", 0.75)
+# === API Keys ===
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
-API_DELAY_SEC    = getenv_float("API_DELAY_SEC", 5.0)  # delay padrão mais alto
-MAX_RETRIES      = int(getenv_float("MAX_RETRIES", 4))
-BACKOFF_BASE     = getenv_float("BACKOFF_BASE", 2.0)
-BATCH_SIZE       = int(getenv_float("BATCH_SIZE", 10))
+# === Configurações de Sinais ===
+MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", 75))  # publicar sinais acima de 75%
+MAX_SYMBOLS = int(os.getenv("MAX_SYMBOLS", 20))          # máximo de moedas analisadas
 
-TOP_SYMBOLS      = int(os.getenv("TOP_SYMBOLS", "8"))   # <- novo
+# === Configurações de Delay e Tentativas para CoinGecko ===
+API_DELAY_BULK = 2.5    # segundos entre chamadas de preço em lote
+API_DELAY_OHLC = 2.5    # segundos entre chamadas OHLC
+MAX_RETRIES = 4         # número máximo de tentativas
+BACKOFF_BASE = 2        # tempo base para backoff exponencial
 
-LOG_LEVEL        = os.getenv("LOG_LEVEL", "INFO").upper()
-
+# === Configuração do Telegram ===
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
-# Delay entre chamadas à API CoinGecko (segundos)
-API_DELAY_BULK = 2.5    # para /simple/price
-API_DELAY_OHLC = 2.5    # para /ohlc
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# Quantidade máxima de tentativas por chamada
-MAX_RETRIES = 4
-
-# Tempo base de espera no backoff exponencial
-BACKOFF_BASE = 2
+# === Pastas e Arquivos ===
+DATA_RAW_FILE = "data_raw.json"
+SIGNALS_FILE = "signals.json"
+MODEL_FILE = "model.pkl"
