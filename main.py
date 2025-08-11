@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os, json, time
 from datetime import datetime
+
 from config import (
     MIN_CONFIDENCE, DEBUG_SCORE, TOP_SYMBOLS,
     BATCH_OHLC, BATCH_PAUSE_SEC, SYMBOLS,
@@ -12,7 +13,7 @@ from notifier_telegram import send_signal_notification
 
 def log(msg): print(msg, flush=True)
 def chunks(lst, n): 
-    for i in range(0, len(lst), n): 
+    for i in range(0, len(lst), n):
         yield lst[i:i+n]
 
 def run_pipeline():
@@ -22,7 +23,8 @@ def run_pipeline():
     ranked = []
     for s in SYMBOLS:
         info = bulk.get(s)
-        if not info: continue
+        if not info: 
+            continue
         ranked.append((s, abs(float(info.get("usd_24h_change", 0.0)))))
     ranked.sort(key=lambda t: t[1], reverse=True)
     selected = [sym for sym, _ in ranked[:max(1, int(TOP_SYMBOLS))]]
@@ -38,7 +40,8 @@ def run_pipeline():
             log(f"📊 Coletando OHLC {s} (days={OHLC_DAYS})…")
             data = fetch_ohlc(cid, days=OHLC_DAYS)
             if data:
-                candles = [{"timestamp": int(ts/1000), "open": float(o), "high": float(h), "low": float(l), "close": float(c)} for ts,o,h,l,c in data]
+                candles = [{"timestamp": int(ts/1000), "open": float(o), "high": float(h),
+                            "low": float(l), "close": float(c)} for ts,o,h,l,c in data]
                 all_data.append({"symbol": s, "ohlc": candles})
                 log(f"   → OK | candles={len(candles)}")
             else:
@@ -73,7 +76,11 @@ def run_pipeline():
             if DEBUG_SCORE:
                 closes = [c["close"] for c in item["ohlc"]]
                 sc = score_signal(closes)
-                shown = "None" if sc is None else f"{round(sc*100,1)}%"
+                if sc is None:
+                    shown = "None"
+                else:
+                    sc_val = sc[0] if isinstance(sc, tuple) else sc
+                    shown = f"{round(sc_val*100,1)}%"
                 log(f"ℹ️ Score {s}: {shown} (min {int(thr*100)}%)")
             else:
                 log(f"⛔ {s} descartado (<{int(thr*100)}%)")
