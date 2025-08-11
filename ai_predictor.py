@@ -1,45 +1,37 @@
-import joblib
-import pandas as pd
-import numpy as np
+# -*- coding: utf-8 -*-
+import os, joblib
 
-MODEL_FILE = "ai_model.pkl"
-
-FEATURES = [
-    "symbol",
-    "rsi", "macd_diff", "sma_ratio", "volume_ratio",
-    "volatility", "momentum", "sentiment_score",
-    "hour_of_day", "day_of_week", "confidence_score",
-]
-
-_model = None
+_MODEL = None
+_MODEL_PATH = os.getenv("MODEL_FILE", "model.pkl")
+_LOGGED_ACTIVE = False  # evita log duplicado por execução
 
 def load_model():
-    global _model
-    if _model is None:
-        _model = joblib.load(MODEL_FILE)
-    return _model
-
-def _ensure_row_schema(row: dict) -> pd.DataFrame:
-    safe = {}
-    for k in FEATURES:
-        if k not in row:
-            safe[k] = 0 if k != "symbol" else "BTCUSDT"
-        else:
-            safe[k] = row[k]
-    for c in [f for f in FEATURES if f != "symbol"]:
-        try:
-            safe[c] = float(safe[c])
-        except:
-            safe[c] = 0.0
-    safe["symbol"] = str(safe["symbol"])
-    return pd.DataFrame([safe], columns=FEATURES)
-
-def predict_success_proba(feature_row: dict) -> float:
+    global _MODEL, _LOGGED_ACTIVE
+    if _MODEL is not None:
+        return _MODEL
     try:
-        model = load_model()
-        X = _ensure_row_schema(feature_row)
-        proba = model.predict_proba(X)[0, 1]
-        return float(np.clip(proba, 0.0, 1.0))
+        if os.path.exists(_MODEL_PATH):
+            _MODEL = joblib.load(_MODEL_PATH)
+        else:
+            _MODEL = None
     except Exception as e:
-        print(f"[AI] Falha na predição: {e}")
-        return 0.5
+        print(f"⚠️ IA: falha ao carregar modelo: {e}")
+        _MODEL = None
+    return _MODEL
+
+def log_if_active(threshold: float):
+    """Chame após load_model() no main para logar ativação uma única vez."""
+    global _LOGGED_ACTIVE
+    if _MODEL is not None and not _LOGGED_ACTIVE:
+        print(f"🤖 IA treinada e agora ativa no cálculo de sinais! (limiar={int(threshold*100)}%)", flush=True)
+        _LOGGED_ACTIVE = True
+
+def predict_proba(model, X_row):
+    try:
+        if hasattr(model, "predict_proba"):
+            return float(model.predict_proba([X_row])[0][1])
+        pred = model.predict([X_row])[0]
+        return float(pred)  # 0/1 em fallback
+    except Exception as e:
+        print(f"⚠️ IA: erro na predição: {e}")
+        return None
