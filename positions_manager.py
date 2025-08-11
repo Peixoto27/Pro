@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 POSITIONS_FILE = os.getenv("POSITIONS_FILE", "positions.json")
 
@@ -21,47 +21,49 @@ def _save_positions(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def should_send_and_register(symbol):
+def should_send_and_register(symbol, cooldown_hours=0):
     """
-    Verifica se um sinal para 'symbol' já está aberto.
-    Se não estiver, registra e retorna True.
-    Se já estiver aberto, retorna False.
+    Verifica se um sinal para 'symbol' pode ser enviado.
+    - Se já existir e ainda estiver no cooldown, retorna (False, motivo)
+    - Se não existir ou cooldown expirou, registra e retorna (True, 'ok')
     """
     data = _load_positions()
+    now = datetime.utcnow()
 
-    # Já existe posição aberta para esse símbolo?
     for pos in data["open"]:
         if pos["symbol"] == symbol:
-            return False
+            opened_at = datetime.utcfromtimestamp(pos["opened_at"])
+            if cooldown_hours > 0 and now - opened_at < timedelta(hours=cooldown_hours):
+                return False, f"Aguardando cooldown ({cooldown_hours}h)"
+            else:
+                # Cooldown expirou, atualiza o horário
+                pos["opened_at"] = now.timestamp()
+                _save_positions(data)
+                return True, "Cooldown expirado, reenviando"
 
-    # Registra nova posição
+    # Não encontrado, registrar novo
     data["open"].append({
         "symbol": symbol,
-        "opened_at": datetime.utcnow().timestamp()
+        "opened_at": now.timestamp()
     })
     _save_positions(data)
-    return True
+    return True, "Novo sinal"
 
 
 def close_position(symbol, result):
     """
-    Move uma posição de 'open' para 'closed', registrando o resultado.
+    Fecha uma posição aberta e move para 'closed'.
     """
     data = _load_positions()
-    closed_at = datetime.utcnow().timestamp()
-    to_close = None
+    now = datetime.utcnow().timestamp()
 
     for pos in data["open"]:
         if pos["symbol"] == symbol:
-            to_close = pos
-            break
-
-    if to_close:
-        data["open"].remove(to_close)
-        to_close["closed_at"] = closed_at
-        to_close["result"] = result
-        data["closed"].append(to_close)
-        _save_positions(data)
-        return True
+            data["open"].remove(pos)
+            pos["closed_at"] = now
+            pos["result"] = result
+            data["closed"].append(pos)
+            _save_positions(data)
+            return True
 
     return False
