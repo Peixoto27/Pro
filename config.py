@@ -22,8 +22,8 @@ MAX_RETRIES     = int(os.getenv("MAX_RETRIES", 6))
 BACKOFF_BASE    = float(os.getenv("BACKOFF_BASE", 2.5))
 
 # OHLC / histórico
-OHLC_DAYS = int(os.getenv("OHLC_DAYS", "14"))  # valores válidos: 1,7,14,30,90,180,365
-MIN_BARS  = int(os.getenv("MIN_BARS", "40"))   # mínimo de candles pra calcular score
+OHLC_DAYS = int(os.getenv("OHLC_DAYS", "14"))   # 1,7,14,30,90,180,365
+MIN_BARS  = int(os.getenv("MIN_BARS", "40"))    # mínimo de candles p/ score
 
 # Batching
 BATCH_OHLC      = int(os.getenv("BATCH_OHLC", 8))
@@ -38,7 +38,12 @@ DATA_RAW_FILE = os.getenv("DATA_RAW_FILE", "data_raw.json")
 SIGNALS_FILE  = os.getenv("SIGNALS_FILE",  "signals.json")
 HISTORY_FILE  = os.getenv("HISTORY_FILE",  "history.json")
 
-# IA (opcional)
+# IA
 USE_AI       = os.getenv("USE_AI", "true").lower() == "true"
 AI_THRESHOLD = float(os.getenv("AI_THRESHOLD", "0.55"))
 MODEL_FILE   = os.getenv("MODEL_FILE", "model.pkl")
+
+# Anti-duplicado / updates
+COOLDOWN_HOURS       = float(os.getenv("COOLDOWN_HOURS", "6"))
+CHANGE_THRESHOLD_PCT = float(os.getenv("CHANGE_THRESHOLD_PCT", "1.0"))
+SEND_STATUS_UPDATES  = os.getenv("SEND_STATUS_UPDATES", "true").lower() == "true"
