@@ -1,19 +1,27 @@
-# ai_model/predict.py
+# ai_predictor.py
 import joblib
-import numpy as np
+import os
 
-# Carregar modelo treinado
-model = joblib.load("ai_model/model.pkl")
+MODEL_PATH = "ai_model/model.pkl"
 
-def predict_signal(rsi, macd, ema20, ema50, adx):
-    X_input = np.array([[rsi, macd, ema20, ema50, adx]])
-    pred = model.predict(X_input)[0]
-    prob = model.predict_proba(X_input)[0]
-    return {
-        "prediction": int(pred),  # 1=alta, 0=baixa
-        "confidence": float(max(prob))
-    }
+def load_model():
+    if os.path.exists(MODEL_PATH):
+        try:
+            return joblib.load(MODEL_PATH)
+        except Exception as e:
+            print(f"❌ Erro ao carregar modelo: {e}")
+            return None
+    else:
+        print("⚠️ Nenhum modelo IA encontrado. Execute train.py primeiro.")
+        return None
 
-# Exemplo rápido
-if __name__ == "__main__":
-    print(predict_signal(45, -0.01, 2.5, 2.6, 18))
+def predict_proba(model, features):
+    try:
+        proba = model.predict_proba([features])[0][1]  # probabilidade de "alta"
+        return float(proba)
+    except Exception as e:
+        print(f"❌ Erro na predição: {e}")
+        return None
+
+def log_if_active(threshold):
+    print(f"🤖 IA ativa | Threshold={int(threshold*100)}%")
