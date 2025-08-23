@@ -4,7 +4,10 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import joblib
-import os, json
+import os, json, sys
+
+# 🔧 Corrige caminho para acessar arquivos da raiz do projeto
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from indicators import rsi, macd, ema, bollinger
 from apply_strategies import score_signal
