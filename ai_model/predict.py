@@ -1,27 +1,48 @@
-# ai_predictor.py
+# ai_model/predict.py
 import joblib
-import os
+import numpy as np
+import sys, os
+
+# 🔧 Corrige caminho para acessar raiz do projeto
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from indicators import rsi, macd, ema, bollinger
+from apply_strategies import score_signal
 
 MODEL_PATH = "ai_model/model.pkl"
 
-def load_model():
-    if os.path.exists(MODEL_PATH):
-        try:
-            return joblib.load(MODEL_PATH)
-        except Exception as e:
-            print(f"❌ Erro ao carregar modelo: {e}")
-            return None
-    else:
-        print("⚠️ Nenhum modelo IA encontrado. Execute train.py primeiro.")
+# Carregar modelo salvo
+model = joblib.load(MODEL_PATH)
+
+def predict_signal(closes):
+    """Recebe lista de preços de fechamento e retorna previsão"""
+    if len(closes) < 60:
         return None
 
-def predict_proba(model, features):
-    try:
-        proba = model.predict_proba([features])[0][1]  # probabilidade de "alta"
-        return float(proba)
-    except Exception as e:
-        print(f"❌ Erro na predição: {e}")
-        return None
+    R = rsi(closes, 14)
+    M, S, H = macd(closes, 12, 26, 9)
+    E20 = ema(closes, 20)
+    E50 = ema(closes, 50)
+    Bup, Bmid, Blow = bollinger(closes, 20, 2.0)
 
-def log_if_active(threshold):
-    print(f"🤖 IA ativa | Threshold={int(threshold*100)}%")
+    i = len(closes) - 1
+    feats = [R[i], M[i], S[i], H[i], E20[i], E50[i], Bup[i], Bmid[i], Blow[i]]
+    sc = score_signal(closes)
+    sc_val = sc[0] if isinstance(sc, tuple) else sc
+    feats.append(sc_val)
+
+    X_input = np.array([feats])
+    pred = model.predict(X_input)[0]
+    proba = model.predict_proba(X_input)[0]
+
+    return {
+        "prediction": int(pred),       # 1 = alta, 0 = baixa
+        "confidence_up": float(proba[1]),
+        "confidence_down": float(proba[0])
+    }
+
+# 🔎 Exemplo rápido
+if __name__ == "__main__":
+    closes = [i for i in range(100, 160)]  # sequência fictícia
+    result = predict_signal(closes)
+    print("Teste de previsão:", result)
